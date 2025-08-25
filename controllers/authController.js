@@ -5,6 +5,56 @@ const BranchRegistry = require('../models/BranchRegistry');
 const FinancialSnapshot = require('../models/FinancialSnapshot');
 const { dayBounds, toDateKey } = require('../services/snapshotService');
 
+// Public: list unique branches for login (branchName + branchCode)
+exports.listBranchesForLogin = async (req, res) => {
+  try {
+    const branches = await User.aggregate([
+      { $match: { branch: { $ne: null }, branchCode: { $ne: null } } },
+      { $group: { _id: '$branchCode', branchName: { $first: '$branch' }, branchCode: { $first: '$branchCode' } } },
+      { $project: { _id: 0, branchName: 1, branchCode: 1 } },
+      { $sort: { branchName: 1 } },
+    ]);
+    return res.json(branches);
+  } catch (err) {
+    console.error('[AUTH] listBranchesForLogin error', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Public: list users for login by branchCode (loan officers and field agents only)
+exports.listUsersForLogin = async (req, res) => {
+  try {
+    const { branchCode } = req.query;
+    if (!branchCode) {
+      return res.status(400).json({ message: 'branchCode is required' });
+    }
+    // Be tolerant of data inconsistencies:
+    // - Roles might have different casing in historical data
+    // - Client may pass branch name instead of code (fallback path on mobile)
+    const roleMatch = {
+      $or: [
+        { role: { $regex: /^loan officer$/i } },
+        { role: { $regex: /^field agent$/i } },
+      ]
+    };
+    const branchMatch = {
+      $or: [
+        { branchCode: branchCode },
+        { branch: branchCode },
+      ]
+    };
+
+    const users = await User.find({ $and: [branchMatch, roleMatch] })
+      .select('_id username email role branch branchCode')
+      .sort({ username: 1 });
+    console.log('[AUTH] listUsersForLogin', { branchCodeParam: branchCode, count: users.length });
+    return res.json(users);
+  } catch (err) {
+    console.error('[AUTH] listUsersForLogin error', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // User registration
 exports.register = async (req, res) => {
   const { username, email, password, role, branch, branchCode } = req.body;

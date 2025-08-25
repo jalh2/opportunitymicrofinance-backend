@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { register, login } = require('../controllers/authController');
+const { register, login, listBranchesForLogin, listUsersForLogin } = require('../controllers/authController');
 
 // @route   POST api/auth/register
 // @desc    Register a user
@@ -11,6 +11,10 @@ router.post('/register', register);
 // @desc    Authenticate user & get token
 // @access  Public
 router.post('/login', login);
+
+// Public endpoints to support pre-login selection
+router.get('/branches', listBranchesForLogin);
+router.get('/users', listUsersForLogin);
 
 
 module.exports = router;
