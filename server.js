@@ -20,8 +20,6 @@ app.use(cors({
   preflightContinue: false,
   optionsSuccessStatus: 204,
 }));
-// Enable preflight for all routes
-app.options('*', cors());
 app.use(express.json());
 
 app.use((req, res, next) => {
