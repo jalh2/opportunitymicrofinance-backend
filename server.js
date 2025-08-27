@@ -20,7 +20,9 @@ app.use(cors({
   preflightContinue: false,
   optionsSuccessStatus: 204,
 }));
-app.use(express.json());
+// Increase body size limits to allow base64 images from mobile app
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.use((req, res, next) => {
   console.log(req.path, req.method);
