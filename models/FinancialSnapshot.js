@@ -28,9 +28,19 @@ const financialSnapshotSchema = new mongoose.Schema({
   periodEnd: { type: Date, required: true },
   metrics: { type: metricsSchema, default: () => ({}) },
   computedAt: { type: Date, default: Date.now },
+  // Optional audit/context fields to capture the most recent actor and scope
+  group: { type: mongoose.Schema.Types.ObjectId, ref: 'Group' },
+  groupName: { type: String },
+  groupCode: { type: String },
+  updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  updatedByName: { type: String },
+  updatedByEmail: { type: String },
+  updateSource: { type: String }, // e.g. 'savingsTransaction', 'loanCollection', 'distribution', 'expense', 'clientRegistration'
 }, { timestamps: true });
 
 financialSnapshotSchema.index({ branchCode: 1, dateKey: 1, currency: 1 });
 financialSnapshotSchema.index({ branchName: 1, dateKey: 1, currency: 1 });
+financialSnapshotSchema.index({ group: 1, dateKey: 1, currency: 1 });
 
 module.exports = mongoose.model('FinancialSnapshot', financialSnapshotSchema);
+

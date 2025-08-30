@@ -44,6 +44,9 @@ const groupSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
+// Indexes for faster lookups by branch
+groupSchema.index({ branchName: 1 });
+
 groupSchema.virtual('memberCount').get(function() {
   return this.clients ? this.clients.length : 0;
 });

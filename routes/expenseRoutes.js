@@ -9,9 +9,10 @@ const {
   updateExpenseStatus,
   getExpenseAnalytics
 } = require('../controllers/expenseController');
+const { identifyUserFromHeader } = require('../middleware/authMiddleware');
 
 // Create new expense
-router.post('/', createExpense);
+router.post('/', identifyUserFromHeader, createExpense);
 
 // Get all expenses with filtering
 router.get('/', getAllExpenses);
@@ -26,7 +27,7 @@ router.get('/:id', getExpenseById);
 router.put('/:id', updateExpense);
 
 // Update expense status (approve/reject/pay)
-router.patch('/:id/status', updateExpenseStatus);
+router.patch('/:id/status', identifyUserFromHeader, updateExpenseStatus);
 
 // Delete expense
 router.delete('/:id', deleteExpense);

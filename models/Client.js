@@ -19,7 +19,11 @@ const clientSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Group',
     required: true
-  }
+  },
+  // Registrar info (who registered this client)
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false },
+  createdByName: { type: String, required: false },
+  createdByEmail: { type: String, required: false }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Client', clientSchema);

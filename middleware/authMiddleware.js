@@ -47,6 +47,8 @@ const identifyUserFromHeader = async (req, res, next) => {
       role: user.role,
       email: user.email,
       username: user.username,
+      branch: user.branch,
+      branchCode: user.branchCode,
     };
     console.log('[AUTH] identifyUserFromHeader success', { userId: req.user.id, role: req.user.role });
     next();

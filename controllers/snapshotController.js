@@ -119,6 +119,22 @@ exports.computeDailySnapshot = async (req, res) => {
     ]);
     const overdue = overdueAgg[0] || { totalOverdue: 0 };
 
+    // 3b) Cumulative in-term arrears up to end of day (sum of shortfalls minus overpayments across collections)
+    const arrearsToDateAgg = await Loan.aggregate([
+      { $match: Object.assign({ status: 'active', endingDate: { $gte: end } }, loanMatch) },
+      { $unwind: '$collections' },
+      { $match: { 'collections.collectionDate': { $lte: end }, 'collections.currency': currency } },
+      { $project: {
+          delta: { $subtract: [
+            { $ifNull: ['$collections.weeklyAmount', 0] },
+            { $add: [ { $ifNull: ['$collections.fieldCollection', 0] }, { $ifNull: ['$collections.advancePayment', 0] } ] }
+          ] }
+        }
+      },
+      { $group: { _id: null, arrears: { $sum: '$delta' } } }
+    ]);
+    const arrearsToDate = (arrearsToDateAgg[0] && arrearsToDateAgg[0].arrears) || 0;
+
     // 4) Savings flows (by type) for the day
     let savingsFlows = { personal: { dep: 0, wd: 0 }, security: { dep: 0, wd: 0 }, all: { dep: 0, wd: 0 } };
     let personalBalToDate = 0;
@@ -167,15 +183,16 @@ exports.computeDailySnapshot = async (req, res) => {
     const expenses = expenseAgg[0] || { totalExpenses: 0 };
 
     // Profit (simplified): interest + fees + admissionFees - expenses
-    const totalFeesCollected = (dailyCol.fees || 0);
+    // Keep core (loan) fees separate to avoid double-counting when computing profit
+    const coreFeesCollected = (dailyCol.fees || 0);
     const totalInterestCollected = (dailyCol.interest || 0);
     const totalAdmissionFeesVar = totalAdmissionFees;
+    const totalFeesCollected = coreFeesCollected + (totalAdmissionFeesVar || 0); // include admission fees in total fees collected
     const totalExpenses = (expenses.totalExpenses || 0);
-    const totalProfit = totalInterestCollected + totalFeesCollected + totalAdmissionFeesVar - totalExpenses;
+    const totalProfit = totalInterestCollected + coreFeesCollected + totalAdmissionFeesVar - totalExpenses;
 
-    // New semantics: waiting delta for the day = new approvals' total repayable - principal+interest collected today
+    // Do not compute or overwrite totalWaitingToBeCollected here; this metric is now driven solely by distributions.
     const principalCollectedToday = (dailyCol.principal || 0);
-    const waitingDeltaToday = totalRepayableToday - (principalCollectedToday + totalInterestCollected);
 
     const metrics = {
       totalProfit,
@@ -187,8 +204,8 @@ exports.computeDailySnapshot = async (req, res) => {
       totalPersonalSavingsFlow: (savingsFlows.personal.dep || 0) - (savingsFlows.personal.wd || 0),
       totalInterestCollected,
       totalFeesCollected,
-      totalWaitingToBeCollected: waitingDeltaToday,
-      totalOverdue: overdue.totalOverdue || 0,
+      // totalWaitingToBeCollected is intentionally excluded from daily compute
+      totalOverdue: (overdue.totalOverdue || 0) + arrearsToDate,
       totalExpenses,
       totalSavingsBalance: totalSavingsBalanceToDate,
       totalPersonalSavingsBalance: personalBalToDate,
@@ -273,7 +290,29 @@ exports.getSnapshots = async (req, res) => {
     }
 
     const results = await FinancialSnapshot.find(q).sort({ dateKey: -1, currency: 1 });
-    res.json(results);
+    if (results.length > 0) {
+      return res.json(results);
+    }
+
+    // Fallback: if branchCode given but no docs matched (possible when updates use registry ID and doc lacks branchCode),
+    // try resolving the registry-mapped snapshot and return it if it matches the currency filter (if any).
+    if (branchCode) {
+      try {
+        const reg = await BranchRegistry.findOne({ branchCode }).select('snapshotId').lean();
+        if (reg && reg.snapshotId) {
+          const snap = await FinancialSnapshot.findById(reg.snapshotId).lean();
+          if (snap) {
+            if (!currency || snap.currency === currency) {
+              return res.json([snap]);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[SNAPSHOT] getSnapshots registry fallback failed', e);
+      }
+    }
+
+    return res.json([]);
   } catch (error) {
     console.error('[SNAPSHOT] getSnapshots error', error);
     res.status(500).json({ message: error.message || 'Server error' });

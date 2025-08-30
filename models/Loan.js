@@ -82,5 +82,9 @@ loanCollectionSchema.index({ collectionDate: -1 });
 loanCollectionSchema.index({ currency: 1, collectionDate: -1 });
 loanSchema.index({ branchCode: 1, status: 1, endingDate: -1 });
 loanSchema.index({ branchCode: 1, disbursementDate: -1 });
+// Optimizations for monthly audit & shortage lookups
+loanSchema.index({ group: 1, disbursementDate: -1 });
+loanSchema.index({ group: 1, loanOfficerName: 1 });
+loanSchema.index({ branchName: 1, disbursementDate: -1 });
 
 module.exports = mongoose.model('Loan', loanSchema);

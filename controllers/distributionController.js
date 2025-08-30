@@ -3,6 +3,7 @@ const Distribution = require('../models/Distribution');
 const Loan = require('../models/Loan');
 const Group = require('../models/Group');
 const Client = require('../models/Client');
+const snapshotService = require('../services/snapshotService');
 
 // GET /api/loans/:id/distributions
 exports.getDistributionsByLoan = async (req, res) => {
@@ -37,7 +38,7 @@ exports.createDistribution = async (req, res) => {
       return res.status(400).json({ message: 'Invalid loan id' });
     }
 
-    const loan = await Loan.findById(id).select('group currency status');
+    const loan = await Loan.findById(id).select('group currency status branchName branchCode');
     if (!loan) {
       return res.status(404).json({ message: 'Loan not found' });
     }
@@ -82,6 +83,45 @@ exports.createDistribution = async (req, res) => {
     } else {
       const payload = normalize(req.body || {});
       created = await Distribution.create(payload);
+    }
+
+    // Update financial snapshot: increment waiting-to-be-collected by the distributed principal amount(s)
+    try {
+      const arr = Array.isArray(created) ? created : [created];
+      const totalAmt = arr.reduce((s, d) => s + Number(d.amount || 0), 0);
+      if (totalAmt > 0) {
+        // Use the first entry date if available, otherwise now
+        const date = (arr[0] && arr[0].date) ? new Date(arr[0].date) : new Date();
+        // Fetch group name/code for audit context
+        let grpName = '', grpCode = '';
+        if (loan.group) {
+          try {
+            const grpDoc = await Group.findById(loan.group).select('groupName groupCode');
+            if (grpDoc) {
+              grpName = grpDoc.groupName || '';
+              grpCode = grpDoc.groupCode || '';
+            }
+          } catch (_) {}
+        }
+        await snapshotService.incrementMetrics({
+          branchName: loan.branchName || '',
+          branchCode: loan.branchCode || '',
+          currency: loan.currency,
+          date,
+          inc: { totalWaitingToBeCollected: totalAmt },
+          // audit/context
+          group: loan.group || null,
+          groupName: grpName,
+          groupCode: grpCode,
+          updatedBy: (req.user && req.user.id) || null,
+          updatedByName: (req.user && req.user.username) || '',
+          updatedByEmail: (req.user && req.user.email) || '',
+          updateSource: 'distribution',
+        });
+      }
+    } catch (e) {
+      // Non-fatal: log and continue
+      console.error('[DISTRIBUTIONS] snapshot increment failed', e);
     }
 
     // Return refreshed list for the loan

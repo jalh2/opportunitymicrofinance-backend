@@ -2,7 +2,7 @@ const Client = require('../models/Client');
 const Group = require('../models/Group');
 const mongoose = require('mongoose');
 const Counter = require('../models/Counter');
-const FinancialSnapshot = require('../models/FinancialSnapshot');
+const snapshotService = require('../services/snapshotService');
 
 // Register a new client
 exports.registerClient = async (req, res) => {
@@ -45,7 +45,11 @@ exports.registerClient = async (req, res) => {
         passBookIssuedDate,
         nationalId,
         memberSignature,
-        group: group._id
+        group: group._id,
+        // registrar attribution
+        createdBy: (req.user && req.user._id) || undefined,
+        createdByName: (req.user && req.user.username) || undefined,
+        createdByEmail: (req.user && req.user.email) || undefined
     });
 
     await client.save();
@@ -60,22 +64,25 @@ exports.registerClient = async (req, res) => {
     // Admission fee: LRD 1,000 collected at registration
     try {
       const fee = 1000;
-      const d = admissionDate ? new Date(admissionDate) : new Date();
-      const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
-      const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
-      const dateKey = start.toISOString().slice(0, 10);
-
-      await FinancialSnapshot.findOneAndUpdate(
-        { branchName: resolvedBranchName || '', branchCode: resolvedBranchCode || '', currency: 'LRD', dateKey },
-        {
-          $setOnInsert: { periodStart: start, periodEnd: end, computedAt: new Date() },
-          $inc: {
-            'metrics.totalAdmissionFees': fee,
-            'metrics.totalProfit': fee
-          }
+      await snapshotService.incrementMetrics({
+        branchName: resolvedBranchName || '',
+        branchCode: resolvedBranchCode || '',
+        currency: 'LRD',
+        date: admissionDate || new Date(),
+        inc: {
+          totalAdmissionFees: fee,
+          totalFeesCollected: fee,
+          totalProfit: fee,
         },
-        { upsert: true, new: true }
-      );
+        // audit/context
+        group: group._id,
+        groupName: resolvedGroupName,
+        groupCode: resolvedGroupCode,
+        updatedBy: (req.user && req.user.id) || null,
+        updatedByName: (req.user && req.user.username) || '',
+        updatedByEmail: (req.user && req.user.email) || '',
+        updateSource: 'clientRegistration',
+      });
     } catch (e) {
       console.warn('[CLIENTS] registerClient: snapshot admission fee increment failed', e.message);
       // Do not fail client creation if snapshot update fails

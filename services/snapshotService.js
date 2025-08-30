@@ -16,7 +16,21 @@ function dayBounds(date) {
   return { start, end, key };
 }
 
-async function incrementMetrics({ branchName = '', branchCode = '', currency = 'LRD', date = new Date(), inc = {} }) {
+async function incrementMetrics({
+  branchName = '',
+  branchCode = '',
+  currency = 'LRD',
+  date = new Date(),
+  inc = {},
+  // audit/context
+  group = null,
+  groupName = '',
+  groupCode = '',
+  updatedBy = null,
+  updatedByName = '',
+  updatedByEmail = '',
+  updateSource = '',
+}) {
   const { start, end, key } = dayBounds(date);
   const $inc = {};
   const safe = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -26,7 +40,16 @@ async function incrementMetrics({ branchName = '', branchCode = '', currency = '
       branchCode: branchCode || '',
       currency,
       dateKey: key,
-      inc
+      inc,
+      audit: {
+        group: group ? String(group) : null,
+        groupName: groupName || null,
+        groupCode: groupCode || null,
+        updatedBy: updatedBy ? String(updatedBy) : null,
+        updatedByName: updatedByName || null,
+        updatedByEmail: updatedByEmail || null,
+        updateSource: updateSource || null,
+      }
     });
   } catch (_) {}
 
@@ -48,22 +71,33 @@ async function incrementMetrics({ branchName = '', branchCode = '', currency = '
   if (inc.totalLoansCount) $inc['metrics.totalLoansCount'] = safe(inc.totalLoansCount);
 
   const now = new Date();
+  // Build $set block with required fields first
+  const setBlock = {
+    computedAt: now,
+    // Keep snapshot document anchored to the current day so "as-of" metrics reflect today's date
+    dateKey: key,
+    periodStart: start,
+    periodEnd: end,
+  };
+  // Only set identity fields when provided (avoid overwriting with empty values)
+  if (branchName) setBlock.branchName = branchName;
+  if (branchCode) setBlock.branchCode = branchCode;
+  if (currency) setBlock.currency = currency;
+  // Optional audit/context fields - set when provided
+  if (group) setBlock.group = group;
+  if (groupName) setBlock.groupName = groupName;
+  if (groupCode) setBlock.groupCode = groupCode;
+  if (updatedBy) setBlock.updatedBy = updatedBy;
+  if (updatedByName) setBlock.updatedByName = updatedByName;
+  if (updatedByEmail) setBlock.updatedByEmail = updatedByEmail;
+  if (updateSource) setBlock.updateSource = updateSource;
+
   const update = {
     $inc,
-    $set: {
-      computedAt: now,
-      // identity/date fields only set on insert to avoid operator conflicts
-    },
+    $set: setBlock,
     $setOnInsert: {
-      branchName: branchName || '',
-      branchCode: branchCode || '',
-      currency,
-      dateKey: key,
-      periodStart: start,
-      periodEnd: end,
-      // Use nested paths to avoid conflicts with $set on 'metrics.updatedAt'
+      // Use nested paths to init timestamps; updatedAt handled by $set
       'metrics.createdAt': now,
-      'metrics.updatedAt': now,
     },
   };
 
@@ -111,6 +145,14 @@ async function incrementMetrics({ branchName = '', branchCode = '', currency = '
           periodEnd: end,
           metrics: { createdAt: now, updatedAt: now },
           computedAt: now,
+          // seed audit if available
+          ...(group ? { group } : {}),
+          ...(groupName ? { groupName } : {}),
+          ...(groupCode ? { groupCode } : {}),
+          ...(updatedBy ? { updatedBy } : {}),
+          ...(updatedByName ? { updatedByName } : {}),
+          ...(updatedByEmail ? { updatedByEmail } : {}),
+          ...(updateSource ? { updateSource } : {}),
         });
         try {
           console.log('[SNAPSHOT] bootstrap: created init snapshot', {
@@ -188,7 +230,7 @@ async function incrementMetrics({ branchName = '', branchCode = '', currency = '
   return doc;
 }
 
-async function incrementForLoanApproval({ loan, date = new Date() }) {
+async function incrementForLoanApproval({ loan, date = new Date(), user = null, groupInfo = null, updateSource = 'loanApproval' }) {
   if (!loan) return null;
   const principal = Number(loan.loanAmount || 0);
   const ratePct = Number(loan.interestRate || 0);
@@ -200,19 +242,29 @@ async function incrementForLoanApproval({ loan, date = new Date() }) {
       branchCode: loan.branchCode,
       currency: loan.currency,
       date: new Date(date).toISOString(),
-      totalRepayable
+      totalRepayable,
+      updateSource,
     });
   } catch (_) {}
+  // Only track loan count at approval; do NOT modify totalWaitingToBeCollected here.
   return incrementMetrics({
     branchName: loan.branchName,
     branchCode: loan.branchCode,
     currency: loan.currency,
     date,
-    inc: { totalLoansCount: 1, totalWaitingToBeCollected: totalRepayable },
+    inc: { totalLoansCount: 1 },
+    // audit
+    group: (groupInfo && (groupInfo.group || groupInfo.groupId)) || loan.group || null,
+    groupName: (groupInfo && groupInfo.groupName) || '',
+    groupCode: (groupInfo && groupInfo.groupCode) || '',
+    updatedBy: user && user.id ? user.id : null,
+    updatedByName: user && user.username ? user.username : '',
+    updatedByEmail: user && user.email ? user.email : '',
+    updateSource,
   });
 }
 
-async function incrementForCollection({ loan, entry }) {
+async function incrementForCollection({ loan, entry, user = null, groupInfo = null, updateSource = 'loanCollection' }) {
   if (!loan || !entry) return null;
   const interest = Number(entry.interestPortion || 0);
   const fees = Number(entry.feesPortion || 0);
@@ -220,6 +272,40 @@ async function incrementForCollection({ loan, entry }) {
   // Decrease outstanding waiting by the amount of principal + interest collected
   const waitingDelta = -1 * (principal + interest);
   const profit = interest + fees; // simplified to match computeDailySnapshot
+  // If loan is overdue as of the collection date, reduce the overdue bucket
+  let overdueDelta = 0;
+  // Arrears (shortfall) or catch-up relative to expected weekly amount
+  // Use entry.weeklyAmount if provided (set by controller), else fall back to loan.weeklyInstallment
+  const expectedWeekly = Number(entry.weeklyAmount || loan.weeklyInstallment || 0);
+  const paidThisEntry = Number(entry.fieldCollection || 0) + Number(entry.advancePayment || 0);
+  // Positive => shortfall (increase overdue). Negative => overpay (reduce overdue).
+  const arrearsDelta = Math.round((expectedWeekly - paidThisEntry) * 100) / 100;
+  try {
+    const endDate = loan.endingDate ? new Date(loan.endingDate) : null;
+    const collDate = entry.collectionDate ? new Date(entry.collectionDate) : new Date();
+    if (endDate && collDate > endDate && loan.status === 'active') {
+      const colls = Array.isArray(loan.collections) ? loan.collections : [];
+      // Sum all collections up to and including this entry's date
+      const sumIncluding = colls.reduce((acc, c) => {
+        if (!c || !c.collectionDate) return acc;
+        const cDate = new Date(c.collectionDate);
+        if (cDate <= collDate) {
+          return acc + Number(c.fieldCollection || 0);
+        }
+        return acc;
+      }, 0);
+      // Approximate prior sum by excluding this entry's fieldCollection
+      const sumBefore = Math.max(sumIncluding - Number(entry.fieldCollection || 0), 0);
+      const principalOnly = Number(loan.loanAmount || 0);
+      const outstandingBefore = Math.max(principalOnly - sumBefore, 0);
+      const outstandingAfter = Math.max(principalOnly - sumIncluding, 0);
+      const decrease = Math.max(outstandingBefore - outstandingAfter, 0);
+      overdueDelta = -1 * decrease; // decrement overdue by the actual reduction
+    }
+  } catch (e) {
+    // non-fatal: log and proceed without overdue adjustment
+    try { console.error('[SNAPSHOT] overdueDelta compute failed', e); } catch (_) {}
+  }
   try {
     console.log('[SNAPSHOT] incrementForCollection', {
       loanId: String(loan._id || ''),
@@ -231,21 +317,43 @@ async function incrementForCollection({ loan, entry }) {
       fees,
       principal,
       waitingDelta,
-      profit
+      profit,
+      overdueDelta,
+      expectedWeekly,
+      paidThisEntry,
+      arrearsDelta
     });
   } catch (_) {}
+
+  const inc = {
+    totalInterestCollected: interest,
+    totalFeesCollected: fees,
+    totalWaitingToBeCollected: waitingDelta,
+    totalProfit: profit,
+  };
+  // Apply arrears adjustment first (can be positive or negative)
+  if (arrearsDelta) {
+    inc.totalOverdue = (inc.totalOverdue || 0) + arrearsDelta;
+  }
+  // Apply post-endingDate overdue reduction
+  if (overdueDelta) {
+    inc.totalOverdue = (inc.totalOverdue || 0) + overdueDelta;
+  }
 
   return incrementMetrics({
     branchName: loan.branchName,
     branchCode: loan.branchCode,
     currency: loan.currency,
     date: entry.collectionDate || new Date(),
-    inc: {
-      totalInterestCollected: interest,
-      totalFeesCollected: fees,
-      totalWaitingToBeCollected: waitingDelta,
-      totalProfit: profit,
-    },
+    inc,
+    // audit
+    group: (groupInfo && (groupInfo.group || groupInfo.groupId)) || loan.group || null,
+    groupName: (groupInfo && groupInfo.groupName) || '',
+    groupCode: (groupInfo && groupInfo.groupCode) || '',
+    updatedBy: user && user.id ? user.id : null,
+    updatedByName: user && user.username ? user.username : '',
+    updatedByEmail: user && user.email ? user.email : '',
+    updateSource,
   });
 }
 

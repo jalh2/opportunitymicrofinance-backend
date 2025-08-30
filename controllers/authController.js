@@ -21,7 +21,7 @@ exports.listBranchesForLogin = async (req, res) => {
   }
 };
 
-// Public: list users for login by branchCode (loan officers and field agents only)
+// Public: list users for login by branchCode (ALL users in the branch)
 exports.listUsersForLogin = async (req, res) => {
   try {
     const { branchCode } = req.query;
@@ -29,14 +29,7 @@ exports.listUsersForLogin = async (req, res) => {
       return res.status(400).json({ message: 'branchCode is required' });
     }
     // Be tolerant of data inconsistencies:
-    // - Roles might have different casing in historical data
     // - Client may pass branch name instead of code (fallback path on mobile)
-    const roleMatch = {
-      $or: [
-        { role: { $regex: /^loan officer$/i } },
-        { role: { $regex: /^field agent$/i } },
-      ]
-    };
     const branchMatch = {
       $or: [
         { branchCode: branchCode },
@@ -44,7 +37,8 @@ exports.listUsersForLogin = async (req, res) => {
       ]
     };
 
-    const users = await User.find({ $and: [branchMatch, roleMatch] })
+    // Return all users matching the branch (no role restriction)
+    const users = await User.find(branchMatch)
       .select('_id username email role branch branchCode')
       .sort({ username: 1 });
     console.log('[AUTH] listUsersForLogin', { branchCodeParam: branchCode, count: users.length });

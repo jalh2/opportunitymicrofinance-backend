@@ -7,7 +7,13 @@ const {
   getAuditReportById, 
   updateAuditReport, 
   deleteAuditReport,
-  generateMonthlyAuditReport
+  generateMonthlyAuditReport,
+  generateOverdueBreakdownReport,
+  generateWeeklyLoanReport,
+  generateBranchMonthlySummary,
+  generateBranchMonthlyShortage,
+  generateMonthlyCollectionAuditReport,
+  generateWeeklyCollectionReport
 } = require('../controllers/reportController');
 
 // All routes are protected and require authentication
@@ -20,6 +26,24 @@ router.route('/')
 
 router.route('/generate-monthly')
   .get(authorizeRoles('admin', 'manager', 'branch head', 'staff', 'loan officer'), generateMonthlyAuditReport);
+
+router.route('/generate-weekly-loans')
+  .get(authorizeRoles('admin', 'manager', 'branch head', 'staff', 'loan officer'), generateWeeklyLoanReport);
+
+router.route('/generate-weekly-collection')
+  .get(authorizeRoles('admin', 'manager', 'branch head', 'staff', 'loan officer'), generateWeeklyCollectionReport);
+
+router.route('/overdue-breakdown')
+  .get(authorizeRoles('admin', 'manager', 'branch head', 'staff', 'loan officer'), generateOverdueBreakdownReport);
+
+router.route('/monthly-collection-audit')
+  .get(authorizeRoles('admin', 'manager', 'branch head', 'staff', 'loan officer'), generateMonthlyCollectionAuditReport);
+
+router.route('/branch-monthly-summary')
+  .get(authorizeRoles('admin', 'manager', 'branch head', 'staff', 'loan officer'), generateBranchMonthlySummary);
+
+router.route('/branch-monthly-shortage')
+  .get(authorizeRoles('admin', 'manager', 'branch head', 'staff', 'loan officer'), generateBranchMonthlyShortage);
 
 router.route('/:id')
   .get(authorizeRoles('admin', 'manager', 'branch head', 'staff', 'loan officer'), getAuditReportById)

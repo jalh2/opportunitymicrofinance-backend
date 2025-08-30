@@ -35,7 +35,13 @@ exports.createLoan = async (req, res) => {
     // If loan is created already active, increment snapshot for approval day
     try {
       if (status === 'active') {
-        await snapshotService.incrementForLoanApproval({ loan, date: new Date() });
+        await snapshotService.incrementForLoanApproval({
+          loan,
+          date: new Date(),
+          user: req.user || null,
+          groupInfo: { group: loan.group, groupName: groupData.groupName, groupCode: groupData.groupCode },
+          updateSource: 'loanApproval',
+        });
       }
     } catch (e) {
       console.error('[SNAPSHOT] incrementForLoanApproval failed', e);
@@ -73,7 +79,7 @@ exports.setLoanStatus = async (req, res) => {
     };
 
     // Load loan and related group to determine member count
-    const loan = await Loan.findById(req.params.id).populate('group', 'groupName clients');
+    const loan = await Loan.findById(req.params.id).populate('group', 'groupName groupCode clients');
     if (!loan) {
       return res.status(404).json({ message: 'Loan not found' });
     }
@@ -99,7 +105,17 @@ exports.setLoanStatus = async (req, res) => {
     // If status just transitioned to 'active', increment snapshot for approval
     try {
       if (prevStatus !== 'active' && status === 'active') {
-        await snapshotService.incrementForLoanApproval({ loan, date: new Date() });
+        await snapshotService.incrementForLoanApproval({
+          loan,
+          date: new Date(),
+          user: req.user || null,
+          groupInfo: {
+            group: (loan.group && loan.group._id) ? loan.group._id : loan.group,
+            groupName: loan.group && loan.group.groupName ? loan.group.groupName : '',
+            groupCode: loan.group && loan.group.groupCode ? loan.group.groupCode : '',
+          },
+          updateSource: 'loanApproval',
+        });
       }
     } catch (e) {
       console.error('[SNAPSHOT] incrementForLoanApproval (status change) failed', e);
@@ -235,7 +251,23 @@ exports.addCollection = async (req, res) => {
 
         // Increment snapshot metrics for this collection event
         try {
-          await snapshotService.incrementForCollection({ loan, entry });
+          let grpName = '', grpCode = '';
+          if (loan.group) {
+            try {
+              const grpDoc = await Group.findById(loan.group).select('groupName groupCode');
+              if (grpDoc) {
+                grpName = grpDoc.groupName || '';
+                grpCode = grpDoc.groupCode || '';
+              }
+            } catch (_) {}
+          }
+          await snapshotService.incrementForCollection({
+            loan,
+            entry,
+            user: req.user || null,
+            groupInfo: { group: loan.group, groupName: grpName, groupCode: grpCode },
+            updateSource: 'loanCollection',
+          });
         } catch (e) {
           console.error('[SNAPSHOT] incrementForCollection failed', e);
         }
@@ -316,7 +348,25 @@ exports.addCollectionsBatch = async (req, res) => {
     await loan.save();
     // Increment snapshots for all enriched entries (fire-and-forget per entry)
     try {
-      await Promise.all((enrichedEntries || []).map((entry) => snapshotService.incrementForCollection({ loan, entry })));
+      let grpName = '', grpCode = '';
+      if (loan.group) {
+        try {
+          const grpDoc = await Group.findById(loan.group).select('groupName groupCode');
+          if (grpDoc) {
+            grpName = grpDoc.groupName || '';
+            grpCode = grpDoc.groupCode || '';
+          }
+        } catch (_) {}
+      }
+      await Promise.all((enrichedEntries || []).map((entry) =>
+        snapshotService.incrementForCollection({
+          loan,
+          entry,
+          user: req.user || null,
+          groupInfo: { group: loan.group, groupName: grpName, groupCode: grpCode },
+          updateSource: 'loanCollection',
+        })
+      ));
     } catch (e) {
       console.error('[SNAPSHOT] incrementForCollection(batch) failed', e);
     }

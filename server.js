@@ -39,6 +39,7 @@ app.use('/api/savings', require('./routes/savingsRoutes'));
 app.use('/api/assets', require('./routes/assetRoutes'));
 app.use('/api/reports', require('./routes/reportRoutes'));
 app.use('/api/expenses', require('./routes/expenseRoutes'));
+app.use('/api/branch-data', require('./routes/branchDataRoutes'));
 app.use('/api/branches', require('./routes/branchRoutes'));
 app.use('/api/financial-summary', require('./routes/financialSummaryRoutes'));
 app.use('/api/snapshots', require('./routes/snapshotRoutes'));
@@ -57,3 +58,4 @@ mongoose.connect(process.env.MONGODB_URI)
   .catch((error) => {
     console.error('Error connecting to MongoDB:', error.message);
   });
+

@@ -1,16 +1,51 @@
 const Expense = require('../models/Expense');
 const User = require('../models/User');
+const snapshotService = require('../services/snapshotService');
 
 // Create a new expense
 exports.createExpense = async (req, res) => {
   try {
+    // Prefer authenticated user's identity for branch and recordedBy
+    const user = req.user || {};
+    const branchName = req.body.branchName || user.branch || '';
+    const branchCode = req.body.branchCode || user.branchCode || '';
+    const currency = req.body.currency || 'LRD';
+
     const expense = new Expense({
       ...req.body,
-      recordedBy: req.user?.id || req.body.recordedBy
+      branchName,
+      branchCode,
+      currency,
+      expenseDate: req.body.expenseDate ? new Date(req.body.expenseDate) : new Date(),
+      recordedBy: user.id || req.body.recordedBy,
     });
 
     await expense.save();
     await expense.populate('recordedBy approvedBy', 'name email');
+    
+    // Update financial snapshot metrics (soft-fail)
+    try {
+      const amount = Number(expense.amount || 0);
+      if (Number.isFinite(amount) && amount !== 0) {
+        await snapshotService.incrementMetrics({
+          branchName: branchName,
+          branchCode: branchCode,
+          currency: expense.currency || 'LRD',
+          date: expense.expenseDate || new Date(),
+          inc: {
+            totalExpenses: amount,
+            totalProfit: -amount,
+          },
+          // audit/context
+          updatedBy: user.id || null,
+          updatedByName: user.username || '',
+          updatedByEmail: user.email || '',
+          updateSource: 'expense',
+        });
+      }
+    } catch (e) {
+      console.error('[SNAPSHOT] expense increment failed', e);
+    }
     
     res.status(201).json(expense);
   } catch (error) {
