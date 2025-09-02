@@ -36,6 +36,7 @@ app.use('/api/groups', require('./routes/groupRoutes'));
 app.use('/api/clients', require('./routes/clientRoutes'));
 app.use('/api/loans', require('./routes/loanRoutes'));
 app.use('/api/savings', require('./routes/savingsRoutes'));
+app.use('/api/personal-savings', require('./routes/personalSavingsRoutes'));
 app.use('/api/assets', require('./routes/assetRoutes'));
 app.use('/api/reports', require('./routes/reportRoutes'));
 app.use('/api/expenses', require('./routes/expenseRoutes'));

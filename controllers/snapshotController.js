@@ -5,6 +5,7 @@ const FIXED_SNAPSHOT_ID = process.env.FIXED_SNAPSHOT_ID;
 const Loan = require('../models/Loan');
 const SavingsAccount = require('../models/Savings');
 const Expense = require('../models/Expense');
+const PersonalSavingsAccount = require('../models/PersonalSavings');
 const Group = require('../models/Group');
 const Client = require('../models/Client');
 
@@ -135,11 +136,17 @@ exports.computeDailySnapshot = async (req, res) => {
     ]);
     const arrearsToDate = (arrearsToDateAgg[0] && arrearsToDateAgg[0].arrears) || 0;
 
-    // 4) Savings flows (by type) for the day
+    // 4) Savings flows (by type) for the day (GROUP savings only)
     let savingsFlows = { personal: { dep: 0, wd: 0 }, security: { dep: 0, wd: 0 }, all: { dep: 0, wd: 0 } };
     let personalBalToDate = 0;
     let securityBalToDate = 0;
     let totalSavingsBalanceToDate = 0;
+
+    // Personal Savings (INDIVIDUAL accounts) metrics
+    let personalAccFlowDep = 0;
+    let personalAccFlowWd = 0;
+    let personalAccFlowNet = 0;
+    let personalAccBalToDateSum = 0;
 
     if (groupIds.length > 0) {
       const flowsDayAgg = await SavingsAccount.aggregate([
@@ -172,6 +179,37 @@ exports.computeDailySnapshot = async (req, res) => {
       totalSavingsBalanceToDate = personalBalToDate + securityBalToDate + (otherDep - otherWd);
     }
 
+    // 4b) Personal Savings Accounts (individual) - compute flows for the day and balance as-of end of day
+    // Flows during the day (dep/wd)
+    const personalAccFlowAgg = await PersonalSavingsAccount.aggregate([
+      { $match: { currency } },
+      { $lookup: { from: 'clients', localField: 'client', foreignField: '_id', as: 'clientDoc' } },
+      { $unwind: '$clientDoc' },
+      ...(branchCode ? [ { $match: { 'clientDoc.branchCode': branchCode } } ] : []),
+      ...(branchName ? [ { $match: { 'clientDoc.branchName': branchName } } ] : []),
+      { $unwind: '$transactions' },
+      { $match: { 'transactions.date': { $gte: start, $lte: end }, 'transactions.currency': currency } },
+      { $group: { _id: null, dep: { $sum: { $ifNull: ['$transactions.savingAmount', 0] } }, wd: { $sum: { $ifNull: ['$transactions.withdrawalAmount', 0] } } } }
+    ]);
+    if (personalAccFlowAgg[0]) {
+      personalAccFlowDep = personalAccFlowAgg[0].dep || 0;
+      personalAccFlowWd = personalAccFlowAgg[0].wd || 0;
+      personalAccFlowNet = (personalAccFlowDep || 0) - (personalAccFlowWd || 0);
+    }
+
+    // Balance as-of end of day: sum currentBalance for accounts in scope
+    const personalAccBalAgg = await PersonalSavingsAccount.aggregate([
+      { $match: { currency } },
+      { $lookup: { from: 'clients', localField: 'client', foreignField: '_id', as: 'clientDoc' } },
+      { $unwind: '$clientDoc' },
+      ...(branchCode ? [ { $match: { 'clientDoc.branchCode': branchCode } } ] : []),
+      ...(branchName ? [ { $match: { 'clientDoc.branchName': branchName } } ] : []),
+      { $group: { _id: null, bal: { $sum: { $ifNull: ['$currentBalance', 0] } } } }
+    ]);
+    if (personalAccBalAgg[0]) {
+      personalAccBalToDateSum = personalAccBalAgg[0].bal || 0;
+    }
+
     // 5) Expenses for the day
     const expenseMatch = { currency, expenseDate: { $gte: start, $lte: end } };
     if (branchCode) expenseMatch.branchCode = branchCode;
@@ -201,14 +239,16 @@ exports.computeDailySnapshot = async (req, res) => {
       totalSavingsWithdrawals: savingsFlows.all.wd,
       netSavingsFlow: (savingsFlows.all.dep || 0) - (savingsFlows.all.wd || 0),
       totalSecurityDepositsFlow: (savingsFlows.security.dep || 0) - (savingsFlows.security.wd || 0),
-      totalPersonalSavingsFlow: (savingsFlows.personal.dep || 0) - (savingsFlows.personal.wd || 0),
+      // Personal savings flow from PersonalSavings accounts only
+      totalPersonalSavingsFlow: personalAccFlowNet,
       totalInterestCollected,
       totalFeesCollected,
       // totalWaitingToBeCollected is intentionally excluded from daily compute
       totalOverdue: (overdue.totalOverdue || 0) + arrearsToDate,
       totalExpenses,
       totalSavingsBalance: totalSavingsBalanceToDate,
-      totalPersonalSavingsBalance: personalBalToDate,
+      // Personal savings balance from PersonalSavings accounts only
+      totalPersonalSavingsBalance: personalAccBalToDateSum,
       totalSecuritySavingsBalance: securityBalToDate,
       totalLoansCount: totalLoansCount || 0,
     };
