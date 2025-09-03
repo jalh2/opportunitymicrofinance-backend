@@ -10,6 +10,8 @@ const metricsSchema = new mongoose.Schema({
   totalPersonalSavingsFlow: { type: Number, default: 0 },
   totalInterestCollected: { type: Number, default: 0 },
   totalFeesCollected: { type: Number, default: 0 },
+  // Total amount collected from loans (e.g., principal repayments)
+  totalCollected: { type: Number, default: 0 },
   totalWaitingToBeCollected: { type: Number, default: 0 },
   totalOverdue: { type: Number, default: 0 },
   totalExpenses: { type: Number, default: 0 },
@@ -17,6 +19,15 @@ const metricsSchema = new mongoose.Schema({
   totalPersonalSavingsBalance: { type: Number, default: 0 },
   totalSecuritySavingsBalance: { type: Number, default: 0 },
   totalLoansCount: { type: Number, default: 0 },
+  // New metrics
+  totalAppraisalFees: { type: Number, default: 0 },
+  totalPendingLoanAmount: { type: Number, default: 0 },
+  // Shortage tracking (sum for the day; per-branch snapshot)
+  loanOfficerShortage: { type: Number, default: 0 },
+  branchShortage: { type: Number, default: 0 },
+  entityShortage: { type: Number, default: 0 },
+  // Bad debt (as-of): outstanding principal for defaulted loans
+  badDebt: { type: Number, default: 0 },
 }, { _id: false, timestamps: true });
 
 const financialSnapshotSchema = new mongoose.Schema({

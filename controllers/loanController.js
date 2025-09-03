@@ -32,6 +32,31 @@ exports.createLoan = async (req, res) => {
     });
 
     await loan.save();
+    // Increment appraisal fee (2%) and pending principal on creation
+    try {
+      const principal = Number(loan.loanAmount || 0);
+      const appraisalFee = Math.round(principal * 0.02 * 100) / 100;
+      await snapshotService.incrementMetrics({
+        branchName: loan.branchName,
+        branchCode: loan.branchCode,
+        currency: loan.currency,
+        date: new Date(),
+        inc: {
+          totalAppraisalFees: appraisalFee,
+          totalPendingLoanAmount: principal,
+        },
+        // audit/context
+        group: loan.group,
+        groupName: groupData.groupName,
+        groupCode: groupData.groupCode,
+        updatedBy: req.user && req.user.id ? req.user.id : null,
+        updatedByName: req.user && req.user.username ? req.user.username : '',
+        updatedByEmail: req.user && req.user.email ? req.user.email : '',
+        updateSource: 'loanCreate',
+      });
+    } catch (e) {
+      console.error('[SNAPSHOT] increment on loan create failed', e);
+    }
     // If loan is created already active, increment snapshot for approval day
     try {
       if (status === 'active') {

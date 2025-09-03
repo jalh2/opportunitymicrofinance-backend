@@ -62,6 +62,7 @@ async function incrementMetrics({
   if (inc.totalPersonalSavingsFlow) $inc['metrics.totalPersonalSavingsFlow'] = safe(inc.totalPersonalSavingsFlow);
   if (inc.totalInterestCollected) $inc['metrics.totalInterestCollected'] = safe(inc.totalInterestCollected);
   if (inc.totalFeesCollected) $inc['metrics.totalFeesCollected'] = safe(inc.totalFeesCollected);
+  if (inc.totalCollected) $inc['metrics.totalCollected'] = safe(inc.totalCollected);
   if (inc.totalWaitingToBeCollected) $inc['metrics.totalWaitingToBeCollected'] = safe(inc.totalWaitingToBeCollected);
   if (inc.totalOverdue) $inc['metrics.totalOverdue'] = safe(inc.totalOverdue);
   if (inc.totalExpenses) $inc['metrics.totalExpenses'] = safe(inc.totalExpenses);
@@ -69,6 +70,13 @@ async function incrementMetrics({
   if (inc.totalPersonalSavingsBalance) $inc['metrics.totalPersonalSavingsBalance'] = safe(inc.totalPersonalSavingsBalance);
   if (inc.totalSecuritySavingsBalance) $inc['metrics.totalSecuritySavingsBalance'] = safe(inc.totalSecuritySavingsBalance);
   if (inc.totalLoansCount) $inc['metrics.totalLoansCount'] = safe(inc.totalLoansCount);
+  // New metrics support
+  if (inc.totalAppraisalFees) $inc['metrics.totalAppraisalFees'] = safe(inc.totalAppraisalFees);
+  if (inc.totalPendingLoanAmount) $inc['metrics.totalPendingLoanAmount'] = safe(inc.totalPendingLoanAmount);
+  if (inc.loanOfficerShortage) $inc['metrics.loanOfficerShortage'] = safe(inc.loanOfficerShortage);
+  if (inc.branchShortage) $inc['metrics.branchShortage'] = safe(inc.branchShortage);
+  if (inc.entityShortage) $inc['metrics.entityShortage'] = safe(inc.entityShortage);
+  if (inc.badDebt) $inc['metrics.badDebt'] = safe(inc.badDebt);
 
   const now = new Date();
   // Build $set block with required fields first
@@ -199,7 +207,7 @@ async function incrementMetrics({
     const doc = await FinancialSnapshot.findOneAndUpdate(
       { _id: mappedId },
       update,
-      { new: true, upsert: true }
+      { new: true, upsert: true, setDefaultsOnInsert: false, timestamps: false }
     );
     try { console.log('[SNAPSHOT] update result (registry)', { _id: doc?._id ? String(doc._id) : null }); } catch (_) {}
     return doc;
@@ -213,7 +221,7 @@ async function incrementMetrics({
     const doc = await FinancialSnapshot.findOneAndUpdate(
       { _id: FIXED_SNAPSHOT_ID },
       update,
-      { new: true, upsert: true }
+      { new: true, upsert: true, setDefaultsOnInsert: false, timestamps: false }
     );
     try { console.log('[SNAPSHOT] update result (FIXED_SNAPSHOT_ID)', { _id: doc?._id ? String(doc._id) : null }); } catch (_) {}
     return doc;
@@ -224,7 +232,7 @@ async function incrementMetrics({
   const doc = await FinancialSnapshot.findOneAndUpdate(
     { branchName: branchName || '', branchCode: branchCode || '', currency, dateKey: key },
     update,
-    { new: true, upsert: true }
+    { new: true, upsert: true, setDefaultsOnInsert: false, timestamps: false }
   );
   try { console.log('[SNAPSHOT] update result (compoundKey)', { _id: doc?._id ? String(doc._id) : null }); } catch (_) {}
   return doc;
@@ -246,13 +254,14 @@ async function incrementForLoanApproval({ loan, date = new Date(), user = null, 
       updateSource,
     });
   } catch (_) {}
-  // Only track loan count at approval; do NOT modify totalWaitingToBeCollected here.
+  // Track loan approval count and decrement pending amount (approval reduces pending bucket).
+  // Do NOT modify totalWaitingToBeCollected here.
   return incrementMetrics({
     branchName: loan.branchName,
     branchCode: loan.branchCode,
     currency: loan.currency,
     date,
-    inc: { totalLoansCount: 1 },
+    inc: { totalLoansCount: 1, totalPendingLoanAmount: -1 * principal },
     // audit
     group: (groupInfo && (groupInfo.group || groupInfo.groupId)) || loan.group || null,
     groupName: (groupInfo && groupInfo.groupName) || '',
@@ -328,6 +337,7 @@ async function incrementForCollection({ loan, entry, user = null, groupInfo = nu
   const inc = {
     totalInterestCollected: interest,
     totalFeesCollected: fees,
+    totalCollected: principal,
     totalWaitingToBeCollected: waitingDelta,
     totalProfit: profit,
   };

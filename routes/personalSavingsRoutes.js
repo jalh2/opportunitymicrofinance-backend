@@ -11,16 +11,19 @@ const { identifyUserFromHeader, authorizeRoles } = require('../middleware/authMi
 // Roles allowed to manage personal savings
 const ALLOWED_ROLES = ['admin', 'manager', 'branch head'];
 
+// Identify user for all routes in this file
+router.use(identifyUserFromHeader);
+
 // Create a savings account (shared account per group)
-router.post('/', identifyUserFromHeader, authorizeRoles(...ALLOWED_ROLES), createPersonalSavingsAccount);
+router.post('/', authorizeRoles(...ALLOWED_ROLES), createPersonalSavingsAccount);
 
 // List all accounts
-router.get('/', getAllPersonalSavingsAccounts);
+router.get('/', authorizeRoles(...ALLOWED_ROLES), getAllPersonalSavingsAccounts);
 
 // Get account by ID
-router.get('/:id', getPersonalSavingsAccountById);
+router.get('/:id', authorizeRoles(...ALLOWED_ROLES), getPersonalSavingsAccountById);
 
 // Add a personal transaction
-router.post('/:id/transactions', identifyUserFromHeader, authorizeRoles(...ALLOWED_ROLES), addPersonalTransaction);
+router.post('/:id/transactions', authorizeRoles(...ALLOWED_ROLES), addPersonalTransaction);
 
 module.exports = router;

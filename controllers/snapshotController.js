@@ -120,6 +120,18 @@ exports.computeDailySnapshot = async (req, res) => {
     ]);
     const overdue = overdueAgg[0] || { totalOverdue: 0 };
 
+    // 3c) Bad debt as of end of day: outstanding (approx) for defaulted loans
+    const badDebtAgg = await Loan.aggregate([
+      { $match: Object.assign({ currency, status: 'defaulted' }, loanMatch) },
+      { $addFields: { loanAmountSafe: { $ifNull: ['$loanAmount', 0] } } },
+      { $unwind: { path: '$collections', preserveNullAndEmptyArrays: true } },
+      { $match: { $or: [ { 'collections.collectionDate': { $lte: end } }, { collections: { $eq: null } } ] } },
+      { $group: { _id: '$_id', loanAmount: { $first: '$loanAmountSafe' }, collectedToDate: { $sum: { $ifNull: ['$collections.fieldCollection', 0] } } } },
+      { $project: { outstanding: { $max: [ { $subtract: ['$loanAmount', '$collectedToDate'] }, 0 ] } } },
+      { $group: { _id: null, badDebt: { $sum: '$outstanding' } } }
+    ]);
+    const badDebtRow = badDebtAgg[0] || { badDebt: 0 };
+
     // 3b) Cumulative in-term arrears up to end of day (sum of shortfalls minus overpayments across collections)
     const arrearsToDateAgg = await Loan.aggregate([
       { $match: Object.assign({ status: 'active', endingDate: { $gte: end } }, loanMatch) },
@@ -243,6 +255,8 @@ exports.computeDailySnapshot = async (req, res) => {
       totalPersonalSavingsFlow: personalAccFlowNet,
       totalInterestCollected,
       totalFeesCollected,
+      // New: principal collected today
+      totalCollected: principalCollectedToday,
       // totalWaitingToBeCollected is intentionally excluded from daily compute
       totalOverdue: (overdue.totalOverdue || 0) + arrearsToDate,
       totalExpenses,
@@ -251,22 +265,49 @@ exports.computeDailySnapshot = async (req, res) => {
       totalPersonalSavingsBalance: personalAccBalToDateSum,
       totalSecuritySavingsBalance: securityBalToDate,
       totalLoansCount: totalLoansCount || 0,
+      // New: shortages and bad debt
+      loanOfficerShortage: shortageToday,
+      branchShortage: shortageToday,
+      entityShortage: shortageToday,
+      badDebt: badDebtRow.badDebt || 0,
     };
 
-    const payload = {
+    const now = new Date();
+    // IMPORTANT: Only set specific metrics fields so we don't overwrite event-driven counters
+    const setBlock = {
       branchName: branchName || '',
       branchCode: branchCode || '',
       currency,
       dateKey: key,
       periodStart: start,
       periodEnd: end,
-      metrics,
-      computedAt: new Date(),
+      computedAt: now,
+      // Daily-computed metrics
+      'metrics.totalProfit': metrics.totalProfit,
+      'metrics.totalAdmissionFees': metrics.totalAdmissionFees,
+      'metrics.totalSavingsDeposits': metrics.totalSavingsDeposits,
+      'metrics.totalSavingsWithdrawals': metrics.totalSavingsWithdrawals,
+      'metrics.netSavingsFlow': metrics.netSavingsFlow,
+      'metrics.totalSecurityDepositsFlow': metrics.totalSecurityDepositsFlow,
+      'metrics.totalPersonalSavingsFlow': metrics.totalPersonalSavingsFlow,
+      'metrics.totalInterestCollected': metrics.totalInterestCollected,
+      'metrics.totalFeesCollected': metrics.totalFeesCollected,
+      'metrics.totalCollected': metrics.totalCollected,
+      'metrics.totalOverdue': metrics.totalOverdue,
+      'metrics.totalExpenses': metrics.totalExpenses,
+      'metrics.totalSavingsBalance': metrics.totalSavingsBalance,
+      'metrics.totalPersonalSavingsBalance': metrics.totalPersonalSavingsBalance,
+      'metrics.totalSecuritySavingsBalance': metrics.totalSecuritySavingsBalance,
+      'metrics.totalLoansCount': metrics.totalLoansCount,
+      'metrics.loanOfficerShortage': metrics.loanOfficerShortage,
+      'metrics.branchShortage': metrics.branchShortage,
+      'metrics.entityShortage': metrics.entityShortage,
+      'metrics.badDebt': metrics.badDebt,
+      'metrics.updatedAt': now,
     };
 
-    const now = new Date();
     const update = {
-      $set: Object.assign({}, payload, { 'metrics.updatedAt': now }),
+      $set: setBlock,
       $setOnInsert: { 'metrics.createdAt': now }
     };
 
@@ -290,19 +331,19 @@ exports.computeDailySnapshot = async (req, res) => {
       snapshot = await FinancialSnapshot.findOneAndUpdate(
         { _id: snapshotId },
         update,
-        { new: true, upsert: true }
+        { new: true, upsert: true, setDefaultsOnInsert: false, timestamps: false }
       );
     } else if (FIXED_SNAPSHOT_ID && mongoose.Types.ObjectId.isValid(FIXED_SNAPSHOT_ID)) {
       snapshot = await FinancialSnapshot.findOneAndUpdate(
         { _id: FIXED_SNAPSHOT_ID },
         update,
-        { new: true, upsert: true }
+        { new: true, upsert: true, setDefaultsOnInsert: false, timestamps: false }
       );
     } else {
       snapshot = await FinancialSnapshot.findOneAndUpdate(
-        { branchCode: payload.branchCode, branchName: payload.branchName, currency, dateKey: key },
+        { branchCode: branchCode || '', branchName: branchName || '', currency, dateKey: key },
         update,
-        { new: true, upsert: true }
+        { new: true, upsert: true, setDefaultsOnInsert: false, timestamps: false }
       );
     }
 
