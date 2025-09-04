@@ -23,7 +23,8 @@ const clientSchema = new mongoose.Schema({
   // Registrar info (who registered this client)
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false },
   createdByName: { type: String, required: false },
-  createdByEmail: { type: String, required: false }
+  createdByEmail: { type: String, required: false },
+  status: { type: String, enum: ['Active', 'Inactive', 'Pending'], default: 'Pending' }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Client', clientSchema);

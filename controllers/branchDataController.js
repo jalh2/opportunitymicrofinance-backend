@@ -1,10 +1,63 @@
 const BranchData = require('../models/BranchData');
+const { incrementMetrics } = require('../services/snapshotService');
 
 // Helper to detect approver roles
 const isApprover = (user) => {
   const role = user?.role || '';
   return ['admin', 'branch head'].includes(role);
 };
+
+// Apply manual metrics to FinancialSnapshot when approved, using delta vs last applied
+async function applySnapshotAdjustments(doc, user, source = 'branchDataManual') {
+  try {
+    if (!doc || doc.status !== 'approved') return doc;
+    const fields = ['loanOfficerShortage', 'branchShortage', 'entityShortage', 'badDebt'];
+    const inc = {};
+    const current = {};
+    fields.forEach(f => {
+      current[f] = Number(doc[f] || 0);
+      const prev = Number((doc.appliedMetrics && doc.appliedMetrics[f]) || 0);
+      const delta = Number(current[f]) - Number(prev);
+      if (delta !== 0) inc[f] = delta;
+    });
+    if (Object.keys(inc).length === 0) {
+      return doc;
+    }
+    const date = doc.dataDate ? new Date(doc.dataDate) : new Date();
+    await incrementMetrics({
+      branchName: doc.branchName || '',
+      branchCode: doc.branchCode || '',
+      currency: doc.currency || 'LRD',
+      date,
+      inc,
+      // audit
+      updatedBy: user && user.id ? user.id : null,
+      updatedByName: user && user.username ? user.username : '',
+      updatedByEmail: user && user.email ? user.email : '',
+      updateSource: source,
+    });
+    // Persist new appliedMetrics snapshot for idempotency
+    const applied = {
+      date,
+      currency: doc.currency || 'LRD',
+      loanOfficerShortage: current.loanOfficerShortage || 0,
+      branchShortage: current.branchShortage || 0,
+      entityShortage: current.entityShortage || 0,
+      badDebt: current.badDebt || 0,
+      appliedAt: new Date(),
+      appliedBy: user && user.id ? user.id : undefined,
+    };
+    const updated = await BranchData.findByIdAndUpdate(
+      doc._id,
+      { $set: { appliedMetrics: applied } },
+      { new: true }
+    ).populate('recordedBy approvedBy', 'username email');
+    return updated || doc;
+  } catch (e) {
+    console.error('[BRANCH_DATA] applySnapshotAdjustments error', e.message);
+    return doc;
+  }
+}
 
 // Create a new Branch Data record
 exports.createBranchData = async (req, res) => {
@@ -24,6 +77,11 @@ exports.createBranchData = async (req, res) => {
       goodsCollectedBank: Number(req.body.goodsCollectedBank || 0),
       goodsCollectedOffice: Number(req.body.goodsCollectedOffice || 0),
       finalOfficeBalance: Number(req.body.finalOfficeBalance || 0),
+      // manual metrics
+      loanOfficerShortage: Number(req.body.loanOfficerShortage || 0),
+      branchShortage: Number(req.body.branchShortage || 0),
+      entityShortage: Number(req.body.entityShortage || 0),
+      badDebt: Number(req.body.badDebt || 0),
       dataDate: req.body.dataDate ? new Date(req.body.dataDate) : new Date(),
       recordedBy: user.id || req.body.recordedBy,
       status: shouldAutoApprove ? 'approved' : 'pending',
@@ -31,11 +89,16 @@ exports.createBranchData = async (req, res) => {
       updatedAt: Date.now(),
     };
 
-    const doc = await BranchData.findOneAndUpdate(
+    let doc = await BranchData.findOneAndUpdate(
       { branchCode },
       update,
       { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
     ).populate('recordedBy approvedBy', 'username email');
+
+    // If auto-approved or already approved, apply deltas to FinancialSnapshot
+    if (doc && doc.status === 'approved') {
+      doc = await applySnapshotAdjustments(doc, user, 'branchDataCreate');
+    }
 
     res.status(201).json(doc);
   } catch (error) {
@@ -112,6 +175,10 @@ exports.updateBranchData = async (req, res) => {
       ...(req.body.goodsCollectedBank !== undefined && { goodsCollectedBank: Number(req.body.goodsCollectedBank) }),
       ...(req.body.goodsCollectedOffice !== undefined && { goodsCollectedOffice: Number(req.body.goodsCollectedOffice) }),
       ...(req.body.finalOfficeBalance !== undefined && { finalOfficeBalance: Number(req.body.finalOfficeBalance) }),
+      ...(req.body.loanOfficerShortage !== undefined && { loanOfficerShortage: Number(req.body.loanOfficerShortage) }),
+      ...(req.body.branchShortage !== undefined && { branchShortage: Number(req.body.branchShortage) }),
+      ...(req.body.entityShortage !== undefined && { entityShortage: Number(req.body.entityShortage) }),
+      ...(req.body.badDebt !== undefined && { badDebt: Number(req.body.badDebt) }),
       ...(req.body.dataDate && { dataDate: new Date(req.body.dataDate) }),
       updatedAt: Date.now(),
     };
@@ -122,13 +189,17 @@ exports.updateBranchData = async (req, res) => {
       update.approvedBy = undefined;
     }
 
-    const doc = await BranchData.findByIdAndUpdate(
+    let doc = await BranchData.findByIdAndUpdate(
       req.params.id,
       update,
       { new: true, runValidators: true }
     ).populate('recordedBy approvedBy', 'username email');
 
     if (!doc) return res.status(404).json({ message: 'Branch data not found' });
+
+    if (doc.status === 'approved') {
+      doc = await applySnapshotAdjustments(doc, user, 'branchDataUpdate');
+    }
 
     res.json(doc);
   } catch (error) {
@@ -154,13 +225,17 @@ exports.updateBranchDataStatus = async (req, res) => {
       update.approvedBy = undefined;
     }
 
-    const doc = await BranchData.findByIdAndUpdate(
+    let doc = await BranchData.findByIdAndUpdate(
       req.params.id,
       update,
       { new: true, runValidators: true }
     ).populate('recordedBy approvedBy', 'username email');
 
     if (!doc) return res.status(404).json({ message: 'Branch data not found' });
+
+    if (doc.status === 'approved') {
+      doc = await applySnapshotAdjustments(doc, req.user || {}, 'branchDataStatus');
+    }
 
     res.json(doc);
   } catch (error) {
@@ -180,3 +255,4 @@ exports.deleteBranchData = async (req, res) => {
     res.status(500).json({ message: 'Error deleting branch data', error: error.message });
   }
 };
+

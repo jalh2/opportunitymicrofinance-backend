@@ -19,6 +19,8 @@ const metricsSchema = new mongoose.Schema({
   totalPersonalSavingsBalance: { type: Number, default: 0 },
   totalSecuritySavingsBalance: { type: Number, default: 0 },
   totalLoansCount: { type: Number, default: 0 },
+  // Total principal amount distributed (sum of disbursed loan amounts)
+  totalLoanAmountDistributed: { type: Number, default: 0 },
   // New metrics
   totalAppraisalFees: { type: Number, default: 0 },
   totalPendingLoanAmount: { type: Number, default: 0 },

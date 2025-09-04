@@ -94,12 +94,18 @@ exports.computeDailySnapshot = async (req, res) => {
     }
 
     // Loans disbursed today: count and total repayable (principal + interest)
-    const loanDisbursedMatch = Object.assign({ disbursementDate: { $gte: start, $lte: end } }, loanMatch);
+    // Restrict to loans that are active to avoid counting pending/defaulted/paid with stale disbursement dates
+    const loanDisbursedMatch = Object.assign({ status: 'active', disbursementDate: { $gte: start, $lte: end } }, loanMatch);
     const loanCountAgg = await Loan.aggregate([
       { $match: loanDisbursedMatch },
       { $group: { _id: null, totalLoansCount: { $sum: 1 } } }
     ]);
     const totalLoansCount = (loanCountAgg[0] && loanCountAgg[0].totalLoansCount) || 0;
+    const loanPrincipalAgg = await Loan.aggregate([
+      { $match: loanDisbursedMatch },
+      { $group: { _id: null, principal: { $sum: { $ifNull: ['$loanAmount', 0] } } } }
+    ]);
+    const totalLoanAmountDistributedToday = (loanPrincipalAgg[0] && loanPrincipalAgg[0].principal) || 0;
     const loanRepayableAgg = await Loan.aggregate([
       { $match: loanDisbursedMatch },
       { $group: { _id: null, repayable:
@@ -265,6 +271,7 @@ exports.computeDailySnapshot = async (req, res) => {
       totalPersonalSavingsBalance: personalAccBalToDateSum,
       totalSecuritySavingsBalance: securityBalToDate,
       totalLoansCount: totalLoansCount || 0,
+      totalLoanAmountDistributed: totalLoanAmountDistributedToday || 0,
       // New: shortages and bad debt
       loanOfficerShortage: shortageToday,
       branchShortage: shortageToday,
@@ -299,6 +306,7 @@ exports.computeDailySnapshot = async (req, res) => {
       'metrics.totalPersonalSavingsBalance': metrics.totalPersonalSavingsBalance,
       'metrics.totalSecuritySavingsBalance': metrics.totalSecuritySavingsBalance,
       'metrics.totalLoansCount': metrics.totalLoansCount,
+      'metrics.totalLoanAmountDistributed': metrics.totalLoanAmountDistributed,
       'metrics.loanOfficerShortage': metrics.loanOfficerShortage,
       'metrics.branchShortage': metrics.branchShortage,
       'metrics.entityShortage': metrics.entityShortage,

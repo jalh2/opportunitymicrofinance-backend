@@ -71,6 +71,7 @@ async function incrementMetrics({
   if (inc.totalSecuritySavingsBalance) $inc['metrics.totalSecuritySavingsBalance'] = safe(inc.totalSecuritySavingsBalance);
   if (inc.totalLoansCount) $inc['metrics.totalLoansCount'] = safe(inc.totalLoansCount);
   // New metrics support
+  if (inc.totalLoanAmountDistributed) $inc['metrics.totalLoanAmountDistributed'] = safe(inc.totalLoanAmountDistributed);
   if (inc.totalAppraisalFees) $inc['metrics.totalAppraisalFees'] = safe(inc.totalAppraisalFees);
   if (inc.totalPendingLoanAmount) $inc['metrics.totalPendingLoanAmount'] = safe(inc.totalPendingLoanAmount);
   if (inc.loanOfficerShortage) $inc['metrics.loanOfficerShortage'] = safe(inc.loanOfficerShortage);
@@ -244,24 +245,27 @@ async function incrementForLoanApproval({ loan, date = new Date(), user = null, 
   const ratePct = Number(loan.interestRate || 0);
   const totalRepayable = principal * (1 + (ratePct / 100));
   try {
+    const eventDate = loan.disbursementDate ? new Date(loan.disbursementDate) : date;
     console.log('[SNAPSHOT] incrementForLoanApproval', {
       loanId: String(loan._id || ''),
       branchName: loan.branchName,
       branchCode: loan.branchCode,
       currency: loan.currency,
-      date: new Date(date).toISOString(),
+      date: new Date(eventDate).toISOString(),
       totalRepayable,
       updateSource,
     });
   } catch (_) {}
-  // Track loan approval count and decrement pending amount (approval reduces pending bucket).
+  // Track loan approval/disbursement count, add to distributed principal, and decrement pending amount (approval reduces pending bucket).
   // Do NOT modify totalWaitingToBeCollected here.
+  // Anchor the update to the loan's disbursementDate when available so daily tallies align
+  const eventDate = loan.disbursementDate ? new Date(loan.disbursementDate) : date;
   return incrementMetrics({
     branchName: loan.branchName,
     branchCode: loan.branchCode,
     currency: loan.currency,
-    date,
-    inc: { totalLoansCount: 1, totalPendingLoanAmount: -1 * principal },
+    date: eventDate,
+    inc: { totalLoansCount: 1, totalPendingLoanAmount: -1 * principal, totalLoanAmountDistributed: principal },
     // audit
     group: (groupInfo && (groupInfo.group || groupInfo.groupId)) || loan.group || null,
     groupName: (groupInfo && groupInfo.groupName) || '',

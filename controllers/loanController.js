@@ -110,6 +110,10 @@ exports.setLoanStatus = async (req, res) => {
     }
     const prevStatus = loan.status;
     loan.status = status;
+    // On activation, if disbursementDate is missing, set it to now so daily metrics align
+    if (prevStatus !== 'active' && status === 'active' && !loan.disbursementDate) {
+      loan.disbursementDate = new Date();
+    }
 
     if (status === 'active') {
       const memberCount = (Array.isArray(loan.clients) && loan.clients.length)
