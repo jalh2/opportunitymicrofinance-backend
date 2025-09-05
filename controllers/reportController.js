@@ -5,6 +5,10 @@ const Distribution = require('../models/Distribution');
 const User = require('../models/User');
 const SavingsAccount = require('../models/Savings');
 const Expense = require('../models/Expense');
+const IncomeStatement = require('../models/IncomeStatement');
+const BalanceSheet = require('../models/BalanceSheet');
+const ChartOfAccounts = require('../models/ChartOfAccounts');
+const Asset = require('../models/Asset');
 
 const { generateMonthlyAudit } = require('../services/reports/monthlyAudit');
 const { generateOverdueBreakdown } = require('../services/reports/overdueBreakdown');
@@ -745,5 +749,415 @@ exports.generateBranchMonthlyShortage = async (req, res) => {
   } catch (error) {
     dbg('generateBranchMonthlyShortage:error', error && error.message ? error.message : String(error));
     return res.status(500).json({ message: 'Error generating branch monthly shortage', error: error.message || 'Unknown error' });
+  }
+};
+
+// =============================
+// Income Statement CRUD
+// =============================
+
+
+// Helper: compute standard rows from sections
+const computeIncomeStatementRows = (sections, existingComputed) => {
+  const secArr = Array.isArray(sections) ? sections : [];
+  const sumItems = (filterFn) => secArr.reduce((acc, s) => {
+    if (!Array.isArray(s.items)) return acc;
+    const subtotal = s.items.reduce((a, it) => {
+      if (filterFn && !filterFn(s, it)) return a;
+      return a + (Number(it.amount || 0));
+    }, 0);
+    return acc + subtotal;
+  }, 0);
+
+  const revenueTotal = sumItems((s) => s.key === 'revenue');
+  const cogsTotal = sumItems((s) => s.key === 'cogs');
+  const opexSelling = sumItems((s) => s.key === 'opex_selling');
+  const opexAdmin = sumItems((s) => s.key === 'opex_admin');
+  const opexTotal = opexSelling + opexAdmin;
+  const otherRevenue = sumItems((s, it) => s.key === 'other' && String(it.type || '').toLowerCase() === 'revenue');
+  const otherExpense = sumItems((s, it) => s.key === 'other' && String(it.type || '').toLowerCase() === 'expense');
+  const netOther = otherRevenue - otherExpense;
+  const taxTotal = sumItems((s) => s.key === 'tax');
+
+  const computed = Object.assign({
+    grossProfit: { auto: true, amount: 0 },
+    operatingIncome: { auto: true, amount: 0 },
+    incomeBeforeTax: { auto: true, amount: 0 },
+    netIncome: { auto: true, amount: 0 },
+  }, existingComputed || {});
+
+  const gp = revenueTotal - cogsTotal;
+  const oi = gp - opexTotal;
+  const ibt = oi + netOther;
+  const ni = ibt - taxTotal;
+
+  if (!computed.grossProfit) computed.grossProfit = { auto: true, amount: 0 };
+  if (!computed.operatingIncome) computed.operatingIncome = { auto: true, amount: 0 };
+  if (!computed.incomeBeforeTax) computed.incomeBeforeTax = { auto: true, amount: 0 };
+  if (!computed.netIncome) computed.netIncome = { auto: true, amount: 0 };
+
+  if (computed.grossProfit.auto) computed.grossProfit.amount = gp;
+  if (computed.operatingIncome.auto) computed.operatingIncome.amount = oi;
+  if (computed.incomeBeforeTax.auto) computed.incomeBeforeTax.amount = ibt;
+  if (computed.netIncome.auto) computed.netIncome.amount = ni;
+
+  return computed;
+};
+
+// POST /api/reports/income-statements
+exports.createIncomeStatement = async (req, res) => {
+  try {
+    const {
+      headerTitle,
+      branchName,
+      branchCode,
+      currency,
+      periodStart,
+      periodEnd,
+      sections,
+      computedRows,
+      notes,
+      title,
+    } = req.body || {};
+
+    if (!branchName || !currency || !periodStart || !periodEnd) {
+      return res.status(400).json({ message: 'branchName, currency, periodStart and periodEnd are required' });
+    }
+
+    const start = new Date(periodStart);
+    const end = new Date(periodEnd);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ message: 'Invalid periodStart or periodEnd' });
+    }
+    if (start > end) {
+      return res.status(400).json({ message: 'periodStart must be before or equal to periodEnd' });
+    }
+
+    const computed = computeIncomeStatementRows(sections, computedRows);
+
+    const doc = new IncomeStatement({
+      title: title || 'Income Statement',
+      headerTitle: headerTitle || '',
+      branchName,
+      branchCode: branchCode || (req.user && req.user.branchCode) || '',
+      currency: String(currency).toUpperCase(),
+      periodStart: start,
+      periodEnd: end,
+      sections: Array.isArray(sections) ? sections : [],
+      computedRows: computed,
+      notes: notes || '',
+      createdBy: req.user ? req.user._id : undefined,
+      updatedBy: req.user ? req.user._id : undefined,
+    });
+
+    const saved = await doc.save();
+    return res.status(201).json(saved);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error creating income statement', error: error.message || 'Unknown error' });
+  }
+};
+
+// GET /api/reports/income-statements?branchName=&startDate=&endDate=&limit=10
+exports.listIncomeStatements = async (req, res) => {
+  try {
+    const { branchName, startDate, endDate, limit } = req.query || {};
+    const q = {};
+    if (branchName) q.branchName = branchName;
+    if (startDate) q.periodStart = new Date(startDate);
+    if (endDate) q.periodEnd = new Date(endDate);
+
+    // If both dates provided, match exact period; otherwise return recent
+    let filter = {};
+    if (q.branchName) filter.branchName = q.branchName;
+    if (startDate && endDate) {
+      filter.periodStart = new Date(startDate);
+      filter.periodEnd = new Date(endDate);
+    } else {
+      // no strict period match
+    }
+
+    const max = Math.min(Number(limit) || 20, 100);
+    const docs = await IncomeStatement.find(filter).sort({ updatedAt: -1 }).limit(max);
+    return res.status(200).json(docs);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error fetching income statements', error: error.message || 'Unknown error' });
+  }
+};
+
+// GET /api/reports/income-statements/:id
+exports.getIncomeStatementById = async (req, res) => {
+  try {
+    const doc = await IncomeStatement.findById(req.params.id);
+    if (!doc) return res.status(404).json({ message: 'Income statement not found' });
+    return res.status(200).json(doc);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error fetching income statement', error: error.message || 'Unknown error' });
+  }
+};
+
+// PUT /api/reports/income-statements/:id
+exports.updateIncomeStatement = async (req, res) => {
+  try {
+    const body = req.body || {};
+    const { sections, computedRows } = body;
+    const computed = computeIncomeStatementRows(sections, computedRows);
+
+    const update = Object.assign({}, body, { computedRows: computed, updatedBy: req.user ? req.user._id : undefined });
+    const doc = await IncomeStatement.findByIdAndUpdate(req.params.id, update, { new: true });
+    if (!doc) return res.status(404).json({ message: 'Income statement not found' });
+    return res.status(200).json(doc);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error updating income statement', error: error.message || 'Unknown error' });
+  }
+};
+
+// DELETE /api/reports/income-statements/:id
+exports.deleteIncomeStatement = async (req, res) => {
+  try {
+    const deleted = await IncomeStatement.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: 'Income statement not found' });
+    return res.status(200).json({ message: 'Income statement deleted successfully' });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error deleting income statement', error: error.message || 'Unknown error' });
+  }
+};
+
+// =============================
+// Balance Sheet CRUD
+// =============================
+
+// Helper: compute totals for balance sheet
+const computeBalanceSheetRows = (sections, existingComputed) => {
+  const secArr = Array.isArray(sections) ? sections : [];
+  const sumItems = (filterFn) => secArr.reduce((acc, s) => {
+    if (!Array.isArray(s.items)) return acc;
+    const subtotal = s.items.reduce((a, it) => a + (Number(it.amount || 0)), 0);
+    if (filterFn && !filterFn(s)) return acc;
+    return acc + subtotal;
+  }, 0);
+
+  const assetsCurrent = sumItems((s) => s.key === 'assets_current');
+  const assetsNonCurrent = sumItems((s) => s.key === 'assets_noncurrent');
+  const totalAssets = assetsCurrent + assetsNonCurrent;
+
+  const liabCurrent = sumItems((s) => s.key === 'liabilities_current');
+  const liabNonCurrent = sumItems((s) => s.key === 'liabilities_noncurrent');
+  const totalLiabilities = liabCurrent + liabNonCurrent;
+
+  const totalEquity = sumItems((s) => s.key === 'equity');
+  const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
+  const imbalance = totalAssets - totalLiabilitiesAndEquity;
+
+  const computed = Object.assign({
+    totalAssets: { auto: true, amount: 0 },
+    totalLiabilities: { auto: true, amount: 0 },
+    totalEquity: { auto: true, amount: 0 },
+    totalLiabilitiesAndEquity: { auto: true, amount: 0 },
+    imbalance: { auto: true, amount: 0 },
+  }, existingComputed || {});
+
+  if (computed.totalAssets?.auto ?? true) computed.totalAssets = { auto: true, amount: totalAssets };
+  if (computed.totalLiabilities?.auto ?? true) computed.totalLiabilities = { auto: true, amount: totalLiabilities };
+  if (computed.totalEquity?.auto ?? true) computed.totalEquity = { auto: true, amount: totalEquity };
+  if (computed.totalLiabilitiesAndEquity?.auto ?? true) computed.totalLiabilitiesAndEquity = { auto: true, amount: totalLiabilitiesAndEquity };
+  if (computed.imbalance?.auto ?? true) computed.imbalance = { auto: true, amount: imbalance };
+
+  return computed;
+};
+
+// POST /api/reports/balance-sheets
+exports.createBalanceSheet = async (req, res) => {
+  try {
+    const { headerTitle, branchName, branchCode, currency, periodStart, periodEnd, sections, computedRows, notes, title } = req.body || {};
+
+    if (!branchName || !currency || !periodStart || !periodEnd) {
+      return res.status(400).json({ message: 'branchName, currency, periodStart and periodEnd are required' });
+    }
+
+    const start = new Date(periodStart);
+    const end = new Date(periodEnd);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ message: 'Invalid periodStart or periodEnd' });
+    }
+    if (start > end) {
+      return res.status(400).json({ message: 'periodStart must be before or equal to periodEnd' });
+    }
+
+    const computed = computeBalanceSheetRows(sections, computedRows);
+
+    const doc = new BalanceSheet({
+      title: title || 'Balance Sheet',
+      headerTitle: headerTitle || '',
+      branchName,
+      branchCode: branchCode || (req.user && req.user.branchCode) || '',
+      currency: String(currency).toUpperCase(),
+      periodStart: start,
+      periodEnd: end,
+      sections: Array.isArray(sections) ? sections : [],
+      computedRows: computed,
+      notes: notes || '',
+      createdBy: req.user ? req.user._id : undefined,
+      updatedBy: req.user ? req.user._id : undefined,
+    });
+
+    const saved = await doc.save();
+    return res.status(201).json(saved);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error creating balance sheet', error: error.message || 'Unknown error' });
+  }
+};
+
+// GET /api/reports/balance-sheets
+exports.listBalanceSheets = async (req, res) => {
+  try {
+    const { branchName, startDate, endDate, limit } = req.query || {};
+    const filter = {};
+    if (branchName) filter.branchName = branchName;
+    if (startDate && endDate) {
+      filter.periodStart = new Date(startDate);
+      filter.periodEnd = new Date(endDate);
+    }
+
+    const max = Math.min(Number(limit) || 20, 100);
+    const docs = await BalanceSheet.find(filter).sort({ updatedAt: -1 }).limit(max);
+    return res.status(200).json(docs);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error fetching balance sheets', error: error.message || 'Unknown error' });
+  }
+};
+
+// GET /api/reports/balance-sheets/:id
+exports.getBalanceSheetById = async (req, res) => {
+  try {
+    const doc = await BalanceSheet.findById(req.params.id);
+    if (!doc) return res.status(404).json({ message: 'Balance sheet not found' });
+    return res.status(200).json(doc);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error fetching balance sheet', error: error.message || 'Unknown error' });
+  }
+};
+
+// PUT /api/reports/balance-sheets/:id
+exports.updateBalanceSheet = async (req, res) => {
+  try {
+    const body = req.body || {};
+    const { sections, computedRows } = body;
+    const computed = computeBalanceSheetRows(sections, computedRows);
+
+    const update = Object.assign({}, body, { computedRows: computed, updatedBy: req.user ? req.user._id : undefined });
+    const doc = await BalanceSheet.findByIdAndUpdate(req.params.id, update, { new: true });
+    if (!doc) return res.status(404).json({ message: 'Balance sheet not found' });
+    return res.status(200).json(doc);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error updating balance sheet', error: error.message || 'Unknown error' });
+  }
+};
+
+// DELETE /api/reports/balance-sheets/:id
+exports.deleteBalanceSheet = async (req, res) => {
+  try {
+    const deleted = await BalanceSheet.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: 'Balance sheet not found' });
+    return res.status(200).json({ message: 'Balance sheet deleted successfully' });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error deleting balance sheet', error: error.message || 'Unknown error' });
+  }
+};
+
+// =============================
+// Chart of Accounts CRUD
+// =============================
+
+// POST /api/reports/chart-of-accounts
+exports.createChartOfAccounts = async (req, res) => {
+  try {
+    const { headerTitle, branchName, branchCode, currency, sections, notes, title } = req.body || {};
+    if (!branchName) {
+      return res.status(400).json({ message: 'branchName is required' });
+    }
+    const doc = new ChartOfAccounts({
+      title: title || 'Chart of Accounts',
+      headerTitle: headerTitle || '',
+      branchName,
+      branchCode: branchCode || (req.user && req.user.branchCode) || '',
+      currency: (currency || 'LRD').toUpperCase(),
+      sections: Array.isArray(sections) ? sections : [],
+      notes: notes || '',
+      createdBy: req.user ? req.user._id : undefined,
+      updatedBy: req.user ? req.user._id : undefined,
+    });
+    const saved = await doc.save();
+    return res.status(201).json(saved);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error creating chart of accounts', error: error.message || 'Unknown error' });
+  }
+};
+
+// GET /api/reports/chart-of-accounts
+exports.listChartOfAccounts = async (req, res) => {
+  try {
+    const { branchName, limit } = req.query || {};
+    const filter = {};
+    if (branchName) filter.branchName = branchName;
+    const max = Math.min(Number(limit) || 20, 100);
+    const docs = await ChartOfAccounts.find(filter).sort({ updatedAt: -1 }).limit(max);
+    return res.status(200).json(docs);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error fetching chart of accounts', error: error.message || 'Unknown error' });
+  }
+};
+
+// GET /api/reports/chart-of-accounts/:id
+exports.getChartOfAccountsById = async (req, res) => {
+  try {
+    const doc = await ChartOfAccounts.findById(req.params.id);
+    if (!doc) return res.status(404).json({ message: 'Chart of accounts not found' });
+    return res.status(200).json(doc);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error fetching chart of accounts', error: error.message || 'Unknown error' });
+  }
+};
+
+// PUT /api/reports/chart-of-accounts/:id
+exports.updateChartOfAccounts = async (req, res) => {
+  try {
+    const body = req.body || {};
+    const update = Object.assign({}, body, { updatedBy: req.user ? req.user._id : undefined });
+    const doc = await ChartOfAccounts.findByIdAndUpdate(req.params.id, update, { new: true });
+    if (!doc) return res.status(404).json({ message: 'Chart of accounts not found' });
+    return res.status(200).json(doc);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error updating chart of accounts', error: error.message || 'Unknown error' });
+  }
+};
+
+// DELETE /api/reports/chart-of-accounts/:id
+exports.deleteChartOfAccounts = async (req, res) => {
+  try {
+    const deleted = await ChartOfAccounts.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: 'Chart of accounts not found' });
+    return res.status(200).json({ message: 'Chart of accounts deleted successfully' });
+  } catch (error) {
+    return res.status(500).json({ message: 'Error deleting chart of accounts', error: error.message || 'Unknown error' });
+  }
+};
+
+// GET /api/reports/chart-of-accounts/assets?branchName=...
+exports.listCoaAssets = async (req, res) => {
+  try {
+    const { branchName } = req.query || {};
+    const filter = {};
+    if (branchName) {
+      // Case-insensitive exact match for branch name (trimmed)
+      const name = String(branchName).trim();
+      const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.branch = { $regex: new RegExp(`^${esc}$`, 'i') };
+    }
+    dbg('listCoaAssets:start', { branchName: branchName || null, filter });
+    const assets = await Asset.find(filter).sort({ updatedAt: -1 }).select('assetName assetType currentValue currency branch description');
+    dbg('listCoaAssets:result', { count: Array.isArray(assets) ? assets.length : 0 });
+    return res.status(200).json(assets);
+  } catch (error) {
+    return res.status(500).json({ message: 'Error fetching assets', error: error.message || 'Unknown error' });
   }
 };
