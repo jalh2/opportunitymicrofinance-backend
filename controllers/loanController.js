@@ -3,32 +3,106 @@ const Loan = require('../models/Loan');
 const Client = require('../models/Client');
 const Group = require('../models/Group');
 const snapshotService = require('../services/snapshotService');
+const SavingsAccount = require('../models/Savings');
 
 // Create a new loan application
 exports.createLoan = async (req, res) => {
   try {
-        const {
-      group, branchName, branchCode, meetingTime, meetingDay, memberCode, memberAddress, 
-      guarantorName, guarantorRelationship, loanAmount, loanAmountInWords, loanDurationNumber, 
-      loanDurationUnit, purposeOfLoan, businessType, disbursementDate, endingDate, previousLoanInfo, 
-      memberOccupation, weeklyInstallment, securityDeposit, memberAdmissionFee, rentingOrOwner, 
-      educationBackground, district, maritalStatus, dependents, previousLoanSource, signatories, 
-      collections, interestRate, loanOfficerName, status, currency
+    const {
+      group,
+      client, // required: per-client loan
+      branchName,
+      branchCode,
+      meetingTime,
+      meetingDay,
+      memberCode,
+      memberAddress,
+      guarantorName,
+      guarantorRelationship,
+      guarantorImage, // new field
+      loanAmount,
+      loanAmountInWords,
+      loanDurationNumber,
+      loanDurationUnit,
+      purposeOfLoan,
+      businessType,
+      disbursementDate,
+      endingDate,
+      previousLoanInfo,
+      memberOccupation,
+      weeklyInstallment,
+      securityDeposit,
+      memberAdmissionFee,
+      rentingOrOwner,
+      educationBackground,
+      district,
+      maritalStatus,
+      dependents,
+      previousLoanSource,
+      signatories,
+      collections,
+      interestRate,
+      loanOfficerName,
+      status,
+      currency,
     } = req.body;
 
-    const groupData = await Group.findById(group);
+    // Resolve client and group, and validate that client belongs to the group
+    let clientDoc = null;
+    let groupId = group || null;
+    if (client) {
+      clientDoc = await Client.findById(client).select('group memberName');
+      if (!clientDoc) return res.status(404).json({ message: 'Client not found' });
+      if (!groupId) groupId = clientDoc.group;
+    }
+    if (!client) {
+      return res.status(400).json({ message: 'client is required for per-client loans' });
+    }
+    const groupData = await Group.findById(groupId);
     if (!groupData) {
       return res.status(404).json({ message: 'Group not found' });
     }
+    if (clientDoc && String(clientDoc.group) !== String(groupData._id)) {
+      return res.status(400).json({ message: 'Client does not belong to the specified group' });
+    }
 
     const loan = new Loan({
-      clients: groupData.clients,
-      group, branchName, branchCode, meetingTime, meetingDay, memberCode, memberAddress, 
-      guarantorName, guarantorRelationship, loanAmount, loanAmountInWords, loanDurationNumber, 
-      loanDurationUnit, purposeOfLoan, businessType, disbursementDate, endingDate, previousLoanInfo, 
-      memberOccupation, weeklyInstallment, securityDeposit, memberAdmissionFee, rentingOrOwner, 
-      educationBackground, district, maritalStatus, dependents, previousLoanSource, signatories, 
-      collections, interestRate, loanOfficerName, status, currency
+      group: groupData._id,
+      client: clientDoc ? clientDoc._id : undefined,
+      branchName,
+      branchCode,
+      meetingTime,
+      meetingDay,
+      memberCode,
+      memberAddress,
+      guarantorName,
+      guarantorRelationship,
+      guarantorImage,
+      loanAmount,
+      loanAmountInWords,
+      loanDurationNumber,
+      loanDurationUnit,
+      purposeOfLoan,
+      businessType,
+      disbursementDate,
+      endingDate,
+      previousLoanInfo,
+      memberOccupation,
+      weeklyInstallment,
+      securityDeposit,
+      memberAdmissionFee,
+      rentingOrOwner,
+      educationBackground,
+      district,
+      maritalStatus,
+      dependents,
+      previousLoanSource,
+      signatories,
+      collections,
+      interestRate,
+      loanOfficerName,
+      status,
+      currency,
     });
 
     await loan.save();
@@ -67,6 +141,59 @@ exports.createLoan = async (req, res) => {
           groupInfo: { group: loan.group, groupName: groupData.groupName, groupCode: groupData.groupCode },
           updateSource: 'loanApproval',
         });
+        // Also auto-deposit security deposit into group's savings account
+        const security = Number(loan.securityDeposit || 0);
+        if (security > 0) {
+          const groupId = loan.group;
+          let account = await SavingsAccount.findOne({ group: groupId });
+          if (!account) {
+            account = new SavingsAccount({
+              group: groupId,
+              currency: loan.currency || 'LRD',
+            });
+          }
+          if (!account.currency) {
+            account.currency = loan.currency || 'LRD';
+          }
+          const depositDate = new Date();
+          const deposit = security;
+          const newBalance = Number(account.currentBalance || 0) + deposit;
+          account.transactions.push({
+            date: depositDate,
+            savingAmount: deposit,
+            withdrawalAmount: 0,
+            balance: newBalance,
+            currency: account.currency || 'LRD',
+            type: 'security',
+          });
+          account.currentBalance = newBalance;
+          await account.save();
+
+          try {
+            await snapshotService.incrementMetrics({
+              branchName: loan.branchName,
+              branchCode: loan.branchCode,
+              currency: account.currency || 'LRD',
+              date: depositDate,
+              inc: {
+                totalSavingsDeposits: deposit,
+                netSavingsFlow: deposit,
+                totalSavingsBalance: deposit,
+                totalSecurityDepositsFlow: deposit,
+                totalSecuritySavingsBalance: deposit,
+              },
+              group: groupId,
+              groupName: groupData.groupName || '',
+              groupCode: groupData.groupCode || '',
+              updatedBy: (req.user && req.user.id) || null,
+              updatedByName: (req.user && req.user.username) || '',
+              updatedByEmail: (req.user && req.user.email) || '',
+              updateSource: 'securityDepositOnApproval',
+            });
+          } catch (e2) {
+            console.error('[SNAPSHOT] security deposit increment (create) failed', e2);
+          }
+        }
       }
     } catch (e) {
       console.error('[SNAPSHOT] incrementForLoanApproval failed', e);
@@ -74,7 +201,7 @@ exports.createLoan = async (req, res) => {
     // Return populated loan with groupName for frontend display
     const populated = await Loan.findById(loan._id)
       .populate('group', 'groupName')
-      .populate('clients', 'memberName');
+      .populate('client', 'memberName passBookNumber');
     res.status(201).json(populated);
   } catch (error) {
     console.error(error.message);
@@ -103,8 +230,10 @@ exports.setLoanStatus = async (req, res) => {
       }
     };
 
-    // Load loan and related group to determine member count
-    const loan = await Loan.findById(req.params.id).populate('group', 'groupName groupCode clients');
+    // Load loan and related group
+    const loan = await Loan.findById(req.params.id)
+      .populate('group', 'groupName groupCode branchName')
+      .populate('client', 'memberName');
     if (!loan) {
       return res.status(404).json({ message: 'Loan not found' });
     }
@@ -116,17 +245,12 @@ exports.setLoanStatus = async (req, res) => {
     }
 
     if (status === 'active') {
-      const memberCount = (Array.isArray(loan.clients) && loan.clients.length)
-        || (loan.group && Array.isArray(loan.group.clients) && loan.group.clients.length)
-        || 0;
       const weeks = toWeeks(loan.loanDurationNumber, loan.loanDurationUnit);
-
-      if (memberCount > 0 && weeks > 0 && Number.isFinite(loan.loanAmount)) {
+      if (weeks > 0 && Number.isFinite(loan.loanAmount)) {
         const ratePct = Number(loan.interestRate || 0);
         const totalRepayable = Number(loan.loanAmount) * (1 + (ratePct / 100));
-        const perMemberWeekly = totalRepayable / (weeks * memberCount);
-        // Round to 2 decimals for currency consistency
-        loan.weeklyInstallment = Math.round(perMemberWeekly * 100) / 100;
+        const weekly = totalRepayable / weeks; // per-loan weekly installment
+        loan.weeklyInstallment = Math.round(weekly * 100) / 100;
       }
     }
 
@@ -149,10 +273,72 @@ exports.setLoanStatus = async (req, res) => {
     } catch (e) {
       console.error('[SNAPSHOT] incrementForLoanApproval (status change) failed', e);
     }
+    // Auto-deposit security deposit into group's savings account on activation
+    try {
+      if (prevStatus !== 'active' && status === 'active') {
+        const security = Number(loan.securityDeposit || 0);
+        if (security > 0) {
+          const groupId = (loan.group && loan.group._id) ? loan.group._id : loan.group;
+          let account = await SavingsAccount.findOne({ group: groupId });
+          if (!account) {
+            account = new SavingsAccount({
+              group: groupId,
+              currency: loan.currency || 'LRD',
+            });
+          }
+          if (!account.currency) {
+            account.currency = loan.currency || 'LRD';
+          }
+          const depositDate = new Date();
+          const deposit = security;
+          const newBalance = Number(account.currentBalance || 0) + deposit;
+          account.transactions.push({
+            date: depositDate,
+            savingAmount: deposit,
+            withdrawalAmount: 0,
+            balance: newBalance,
+            currency: account.currency || 'LRD',
+            type: 'security',
+          });
+          account.currentBalance = newBalance;
+          await account.save();
+
+          // Update financial snapshots for this security deposit
+          try {
+            const grp = loan.group;
+            await snapshotService.incrementMetrics({
+              branchName: loan.branchName,
+              branchCode: loan.branchCode,
+              currency: account.currency || 'LRD',
+              date: depositDate,
+              inc: {
+                totalSavingsDeposits: deposit,
+                netSavingsFlow: deposit,
+                totalSavingsBalance: deposit,
+                totalSecurityDepositsFlow: deposit,
+                totalSecuritySavingsBalance: deposit,
+              },
+              // audit/context
+              group: groupId,
+              groupName: (grp && grp.groupName) || '',
+              groupCode: (grp && grp.groupCode) || '',
+              updatedBy: (req.user && req.user.id) || null,
+              updatedByName: (req.user && req.user.username) || '',
+              updatedByEmail: (req.user && req.user.email) || '',
+              updateSource: 'securityDepositOnApproval',
+            });
+          } catch (e2) {
+            console.error('[SNAPSHOT] security deposit increment failed', e2);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[SECURITY_DEPOSIT] auto deposit on approval failed', e);
+    }
     // Return populated loan so UI consistently has groupName and member names
     const populated = await Loan.findById(loan._id)
       .populate('group', 'groupName')
-      .populate('clients', 'memberName');
+      .populate('client', 'memberName passBookNumber');
     return res.json(populated);
   } catch (error) {
     console.error(error.message);
@@ -163,7 +349,9 @@ exports.setLoanStatus = async (req, res) => {
 // Get all loans
 exports.getAllLoans = async (req, res) => {
   try {
-    const loans = await Loan.find().populate('group', 'groupName').populate('clients', 'memberName');
+    const loans = await Loan.find()
+      .populate('group', 'groupName')
+      .populate('client', 'memberName passBookNumber');
     res.json(loans);
   } catch (error) {
     console.error(error.message);
@@ -174,7 +362,9 @@ exports.getAllLoans = async (req, res) => {
 // Get loan by ID
 exports.getLoanById = async (req, res) => {
   try {
-    const loan = await Loan.findById(req.params.id).populate('group').populate('clients');
+    const loan = await Loan.findById(req.params.id)
+      .populate('group')
+      .populate('client');
     if (!loan) {
       return res.status(404).json({ message: 'Loan not found' });
     }
@@ -195,7 +385,7 @@ exports.updateLoan = async (req, res) => {
     // Return populated loan for consistent frontend display
     const populated = await Loan.findById(loan._id)
       .populate('group', 'groupName')
-      .populate('clients', 'memberName');
+      .populate('client', 'memberName passBookNumber');
     res.json(populated);
   } catch (error) {
     console.error(error.message);
@@ -225,7 +415,7 @@ exports.deleteLoan = async (req, res) => {
 // Add a collection record to a loan
 exports.addCollection = async (req, res) => {
     try {
-        const loan = await Loan.findById(req.params.id);
+        const loan = await Loan.findById(req.params.id).populate('client', 'memberName');
         if (!loan) {
             return res.status(404).json({ message: 'Loan not found' });
         }
@@ -253,11 +443,11 @@ exports.addCollection = async (req, res) => {
             default: return Math.max(num, 0);
           }
         };
-        const memberCount = Array.isArray(loan.clients) ? loan.clients.length : 0;
         const weeks = toWeeks(loan.loanDurationNumber, loan.loanDurationUnit);
+        // Per-loan expected amounts
         const expectedWeekly = Number(loan.weeklyInstallment || 0);
-        const expectedPrincipalWeekly = (memberCount > 0 && weeks > 0)
-          ? Number(loan.loanAmount || 0) / (weeks * memberCount)
+        const expectedPrincipalWeekly = (weeks > 0)
+          ? Number(loan.loanAmount || 0) / weeks
           : 0;
         const expectedInterestWeekly = Math.max(expectedWeekly - expectedPrincipalWeekly, 0);
         // normalize incoming numbers
@@ -274,6 +464,10 @@ exports.addCollection = async (req, res) => {
         const factor = denom > 0 ? Math.max(Math.min(entry.fieldCollection / denom, 1), 0) : 0;
         entry.interestPortion = Math.round((expectedInterestWeekly * factor) * 100) / 100;
         entry.principalPortion = Math.round((expectedPrincipalWeekly * factor) * 100) / 100;
+        // Ensure memberName for per-client loans
+        if (!entry.memberName && loan.client && loan.client.memberName) {
+          entry.memberName = loan.client.memberName;
+        }
 
         loan.collections.push(entry);
         await loan.save();
@@ -303,7 +497,7 @@ exports.addCollection = async (req, res) => {
         // Return populated loan so UI has groupName and member names
         const populated = await Loan.findById(loan._id)
           .populate('group', 'groupName')
-          .populate('clients', 'memberName');
+          .populate('client', 'memberName passBookNumber');
         res.status(201).json(populated);
     } catch (error) {
         console.error(error.message);
@@ -314,7 +508,7 @@ exports.addCollection = async (req, res) => {
 // Add multiple collection records (batch) to a loan
 exports.addCollectionsBatch = async (req, res) => {
   try {
-    const loan = await Loan.findById(req.params.id);
+    const loan = await Loan.findById(req.params.id).populate('client', 'memberName');
     if (!loan) {
       return res.status(404).json({ message: 'Loan not found' });
     }
@@ -338,12 +532,10 @@ exports.addCollectionsBatch = async (req, res) => {
         default: return Math.max(num, 0);
       }
     };
-
-    const memberCount = Array.isArray(loan.clients) ? loan.clients.length : 0;
     const weeks = toWeeks(loan.loanDurationNumber, loan.loanDurationUnit);
     const expectedWeekly = Number(loan.weeklyInstallment || 0);
-    const expectedPrincipalWeekly = (memberCount > 0 && weeks > 0)
-      ? Number(loan.loanAmount || 0) / (weeks * memberCount)
+    const expectedPrincipalWeekly = (weeks > 0)
+      ? Number(loan.loanAmount || 0) / weeks
       : 0;
     const expectedInterestWeekly = Math.max(expectedWeekly - expectedPrincipalWeekly, 0);
 
@@ -369,6 +561,9 @@ exports.addCollectionsBatch = async (req, res) => {
       const factor = denom > 0 ? Math.max(Math.min(entry.fieldCollection / denom, 1), 0) : 0;
       entry.interestPortion = Math.round((expectedInterestWeekly * factor) * 100) / 100;
       entry.principalPortion = Math.round((expectedPrincipalWeekly * factor) * 100) / 100;
+      if (!entry.memberName && loan.client && loan.client.memberName) {
+        entry.memberName = loan.client.memberName;
+      }
 
       loan.collections.push(entry);
       enrichedEntries.push(entry);
@@ -402,7 +597,7 @@ exports.addCollectionsBatch = async (req, res) => {
     // Return populated loan so UI has groupName and member names
     const populated = await Loan.findById(loan._id)
       .populate('group', 'groupName')
-      .populate('clients', 'memberName');
+      .populate('client', 'memberName passBookNumber');
     return res.status(201).json(populated);
   } catch (error) {
     console.error(error.message);

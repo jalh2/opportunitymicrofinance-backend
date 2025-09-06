@@ -26,7 +26,8 @@ const loanSchema = new mongoose.Schema({
   // Client and Group Info
 
   group: { type: mongoose.Schema.Types.ObjectId, ref: 'Group', required: true },
-  clients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Client' }],
+  // Per-client loan relation
+  client: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: true },
   branchName: { type: String, required: true },
   branchCode: { type: String, required: true },
   
@@ -37,6 +38,8 @@ const loanSchema = new mongoose.Schema({
   memberAddress: { type: String },
   guarantorName: { type: String, required: true },
   guarantorRelationship: { type: String, required: true },
+  // Optional photo/image for guarantor (Base64 data URL or raw base64)
+  guarantorImage: { type: String },
   loanAmountInWords: { type: String, required: true },
   loanDurationNumber: { type: Number, required: true },
   loanDurationUnit: { type: String, required: true, enum: ['days', 'weeks', 'months', 'years'], default: 'weeks' },
@@ -86,5 +89,8 @@ loanSchema.index({ branchCode: 1, disbursementDate: -1 });
 loanSchema.index({ group: 1, disbursementDate: -1 });
 loanSchema.index({ group: 1, loanOfficerName: 1 });
 loanSchema.index({ branchName: 1, disbursementDate: -1 });
+// New: optimize per-client lookups
+loanSchema.index({ client: 1, disbursementDate: -1 });
 
 module.exports = mongoose.model('Loan', loanSchema);
+

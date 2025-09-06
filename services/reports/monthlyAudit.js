@@ -92,7 +92,7 @@ async function generateMonthlyAudit({ branchName, loanOfficerId, month, year }) 
     const [loansForLedger, loansAll] = await Promise.all([
       Loan.find(loanLedgerQuery).select('loanAmount').lean(),
       Loan.find(allLoansQuery)
-        .select('loanAmount weeklyInstallment disbursementDate endingDate clients collections.fieldCollection collections.collectionDate')
+        .select('loanAmount weeklyInstallment disbursementDate endingDate collections.fieldCollection collections.collectionDate')
         .lean(),
     ]);
 
@@ -103,7 +103,7 @@ async function generateMonthlyAudit({ branchName, loanOfficerId, month, year }) 
     });
     if (REPORT_DEBUG && (!loansAll || loansAll.length === 0)) {
       const recent = await Loan.find({ group: g._id })
-        .select('loanOfficerName disbursementDate endingDate loanAmount weeklyInstallment clients collections')
+        .select('loanOfficerName disbursementDate endingDate loanAmount weeklyInstallment collections')
         .sort({ disbursementDate: -1 })
         .limit(3)
         .lean();
@@ -115,7 +115,6 @@ async function generateMonthlyAudit({ branchName, loanOfficerId, month, year }) 
           loanOfficerName: r.loanOfficerName,
           loanAmount: r.loanAmount,
           weeklyInstallment: r.weeklyInstallment,
-          clientsCount: Array.isArray(r.clients) ? r.clients.length : 0,
           collectionsCount: Array.isArray(r.collections) ? r.collections.length : 0,
         })),
       });
@@ -146,9 +145,9 @@ async function generateMonthlyAudit({ branchName, loanOfficerId, month, year }) 
       const disbDate = loan.disbursementDate ? new Date(loan.disbursementDate) : null;
       const endCap = loan.endingDate ? new Date(loan.endingDate) : endDate;
       const collections = Array.isArray(loan.collections) ? loan.collections : [];
-      const memberCount = Array.isArray(loan.clients) ? loan.clients.length : 0;
-      const weeklyPerMember = num(loan.weeklyInstallment);
-      const weeklyTotal = weeklyPerMember * memberCount; // total expected per week for the loan
+      // Per-loan weekly expected
+      const weeklyBase = num(loan.weeklyInstallment);
+      const weeklyTotal = weeklyBase; // total expected per week for the loan
       // meetingDay alignment intentionally not used in monthly audit
 
       // Collections within the period
@@ -172,9 +171,7 @@ async function generateMonthlyAudit({ branchName, loanOfficerId, month, year }) 
           dbg('loanCalcPeriod', {
             group: g.groupName,
             loanId: loan._id ? String(loan._id) : undefined,
-            weeklyPerMember,
-            memberCount,
-            weeklyTotal,
+            weeklyBase,
             occurrences,
             expectedInPeriodDelta: occurrences * weeklyTotal,
             collectedThisPeriod,
@@ -185,8 +182,7 @@ async function generateMonthlyAudit({ branchName, loanOfficerId, month, year }) 
           group: g.groupName,
           loanId: loan._id ? String(loan._id) : undefined,
           reason: weeklyTotal <= 0 ? 'weeklyTotal<=0' : (!disbDate ? 'no disbursementDate' : 'other'),
-          weeklyPerMember,
-          memberCount,
+          weeklyBase,
           weeklyTotal,
           hasDisbursementDate: Boolean(disbDate),
         });

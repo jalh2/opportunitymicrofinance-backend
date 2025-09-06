@@ -290,8 +290,8 @@ exports.generateWeeklyLoanReport = async (req, res) => {
     if (currency) loanQuery.currency = currency;
 
     const loans = await Loan.find(loanQuery)
-      .populate('group', 'groupName clients')
-      .select('group clients weeklyInstallment disbursementDate endingDate meetingDay branchName branchCode currency collections');
+      .populate('group', 'groupName')
+      .select('group weeklyInstallment disbursementDate endingDate meetingDay branchName branchCode currency collections');
 
     // Helper: meeting day index mapping (0=Sunday ... 6=Saturday)
     const dayIndexMap = {
@@ -314,9 +314,8 @@ exports.generateWeeklyLoanReport = async (req, res) => {
     const activeLoans = [];
 
     for (const loan of loans) {
-      const memberCount = Array.isArray(loan.clients) ? loan.clients.length
-        : (loan.group && Array.isArray(loan.group.clients)) ? loan.group.clients.length : 0;
-      const expectedPerWeek = Math.max(Number(loan.weeklyInstallment || 0) * memberCount, 0);
+      // Per-client loans: expected per week equals loan.weeklyInstallment
+      const expectedPerWeek = Math.max(Number(loan.weeklyInstallment || 0), 0);
 
       // Check overlap with [start, end]
       const loanStart = loan.disbursementDate ? new Date(loan.disbursementDate) : start;
@@ -593,7 +592,7 @@ exports.generateBranchMonthlySummary = async (req, res) => {
       branchName,
       disbursementDate: { $lte: end },
       $or: [ { endingDate: { $exists: false } }, { endingDate: null }, { endingDate: { $gte: start } } ],
-    }).populate('group', 'clients').select('clients group weeklyInstallment meetingDay disbursementDate endingDate loanAmount currency status loanOfficerName collections');
+    }).populate('group', 'groupName').select('group weeklyInstallment meetingDay disbursementDate endingDate loanAmount currency status loanOfficerName collections');
 
     // 1) Disbursed in month
     for (const loan of loans) {
@@ -605,9 +604,7 @@ exports.generateBranchMonthlySummary = async (req, res) => {
 
     // 2) Collections in month, 3) Expected/Shortage in month, 4) Overdue to date
     for (const loan of loans) {
-      const memberCount = Array.isArray(loan.clients) ? loan.clients.length
-        : (loan.group && Array.isArray(loan.group.clients)) ? loan.group.clients.length : 0;
-      const expectedWeekly = Math.max(Number(loan.weeklyInstallment || 0) * memberCount, 0);
+      const expectedWeekly = Math.max(Number(loan.weeklyInstallment || 0), 0);
       const meetingIdx = loan.meetingDay ? dayIndexMap[String(loan.meetingDay).toLowerCase()] : null;
 
       const loanStart = loan.disbursementDate ? new Date(loan.disbursementDate) : start;

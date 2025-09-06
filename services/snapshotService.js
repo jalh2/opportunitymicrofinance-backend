@@ -55,13 +55,10 @@ async function incrementMetrics({
 
   if (inc.totalProfit) $inc['metrics.totalProfit'] = safe(inc.totalProfit);
   if (inc.totalAdmissionFees) $inc['metrics.totalAdmissionFees'] = safe(inc.totalAdmissionFees);
-  if (inc.totalSavingsDeposits) $inc['metrics.totalSavingsDeposits'] = safe(inc.totalSavingsDeposits);
-  if (inc.totalSavingsWithdrawals) $inc['metrics.totalSavingsWithdrawals'] = safe(inc.totalSavingsWithdrawals);
-  if (inc.netSavingsFlow) $inc['metrics.netSavingsFlow'] = safe(inc.netSavingsFlow);
-  if (inc.totalSecurityDepositsFlow) $inc['metrics.totalSecurityDepositsFlow'] = safe(inc.totalSecurityDepositsFlow);
+  // Removed metrics: totalSavingsDeposits, totalSavingsWithdrawals, netSavingsFlow, totalSecurityDepositsFlow
   if (inc.totalPersonalSavingsFlow) $inc['metrics.totalPersonalSavingsFlow'] = safe(inc.totalPersonalSavingsFlow);
   if (inc.totalInterestCollected) $inc['metrics.totalInterestCollected'] = safe(inc.totalInterestCollected);
-  if (inc.totalFeesCollected) $inc['metrics.totalFeesCollected'] = safe(inc.totalFeesCollected);
+  // Removed metric: totalFeesCollected
   if (inc.totalCollected) $inc['metrics.totalCollected'] = safe(inc.totalCollected);
   if (inc.totalWaitingToBeCollected) $inc['metrics.totalWaitingToBeCollected'] = safe(inc.totalWaitingToBeCollected);
   if (inc.totalOverdue) $inc['metrics.totalOverdue'] = safe(inc.totalOverdue);

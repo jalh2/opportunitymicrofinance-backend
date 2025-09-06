@@ -77,7 +77,7 @@ async function generateMonthlyCollectionAudit({ branchName, loanOfficerId, month
     const [loansForLedger, loansAll] = await Promise.all([
       Loan.find(loanLedgerQuery).select('loanAmount currency').lean(),
       Loan.find(allLoansQuery)
-        .select('loanAmount weeklyInstallment disbursementDate endingDate clients currency collections.fieldCollection collections.advancePayment collections.collectionDate collections.currency')
+        .select('loanAmount weeklyInstallment disbursementDate endingDate currency collections.fieldCollection collections.advancePayment collections.collectionDate collections.currency')
         .lean(),
     ]);
 
@@ -93,9 +93,9 @@ async function generateMonthlyCollectionAudit({ branchName, loanOfficerId, month
       const disbDate = loan.disbursementDate ? new Date(loan.disbursementDate) : null;
       const endCap = loan.endingDate ? new Date(loan.endingDate) : endDate;
       const collections = Array.isArray(loan.collections) ? loan.collections : [];
-      const memberCount = Array.isArray(loan.clients) ? loan.clients.length : 0;
-      const weeklyPerMember = num(loan.weeklyInstallment);
-      const weeklyTotal = weeklyPerMember * memberCount;
+      // Per-loan weekly expected
+      const weeklyBase = num(loan.weeklyInstallment);
+      const weeklyTotal = weeklyBase;
 
       // Collections within month
       const inPeriodCollections = collections.filter(c => {

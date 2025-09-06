@@ -68,8 +68,8 @@ async function generateOverdueBreakdown({ branchName, loanOfficerId, month, year
   const t0 = Date.now();
   const loans = await Loan.find(loanQuery)
     .populate('group', 'groupName')
-    .populate('clients', 'memberName')
-    .select('group clients weeklyInstallment disbursementDate endingDate loanOfficerName collections')
+    .populate('client', 'memberName')
+    .select('group client weeklyInstallment disbursementDate endingDate loanOfficerName collections')
     .maxTimeMS(30000)
     .lean();
   queryMs = Date.now() - t0;
@@ -100,50 +100,35 @@ async function generateOverdueBreakdown({ branchName, loanOfficerId, month, year
     const disbDate = loan.disbursementDate ? new Date(loan.disbursementDate) : null;
     const endCap = loan.endingDate ? new Date(loan.endingDate) : endDate;
     const overdueEnd = endCap < endDate ? endCap : endDate;
-    const weeklyPerMember = num(loan.weeklyInstallment);
+    const weeklyPerLoan = num(loan.weeklyInstallment);
     const collections = Array.isArray(loan.collections) ? loan.collections : [];
 
-    // Prepare a lookup of collected-to-date per memberName for this loan
-    const collectedByMember = new Map();
-    for (const c of collections) {
-      if (!c || !c.collectionDate || !c.memberName) continue;
-      const dt = new Date(c.collectionDate);
-      if (dt <= endDate) {
-        const key = String(c.memberName);
-        const prev = collectedByMember.get(key) || 0;
-        collectedByMember.set(key, prev + num(c.fieldCollection));
-      }
+    const memberId = loan.client && loan.client._id ? String(loan.client._id) : undefined;
+    const memberName = (loan.client && loan.client.memberName) ? loan.client.memberName : 'Unknown Member';
+    if (!groupEntry.clients.has(memberName)) {
+      groupEntry.clients.set(memberName, { memberId, memberName, expectedToDate: 0, collectedToDate: 0, overdue: 0 });
     }
+    const clientRow = groupEntry.clients.get(memberName);
 
-    // Iterate members on the loan
-    const members = Array.isArray(loan.clients) ? loan.clients : [];
-    for (const m of members) {
-      const memberId = m && m._id ? String(m._id) : undefined;
-      const memberName = (m && m.memberName) ? m.memberName : 'Unknown Member';
-
-      if (!groupEntry.clients.has(memberName)) {
-        groupEntry.clients.set(memberName, { memberId, memberName, expectedToDate: 0, collectedToDate: 0, overdue: 0 });
-      }
-      const clientRow = groupEntry.clients.get(memberName);
-
-      let expectedToDate = 0;
-      if (weeklyPerMember > 0 && disbDate && disbDate <= overdueEnd) {
-        const occToDate = weeksBetween(disbDate, overdueEnd);
-        expectedToDate = occToDate * weeklyPerMember;
-      }
-      const collectedToDate = collectedByMember.get(memberName) || 0;
-      const overdue = Math.max(expectedToDate - collectedToDate, 0);
-
-      // Accumulate into client (in case multiple loans per member under same group/officer)
-      clientRow.expectedToDate += expectedToDate;
-      clientRow.collectedToDate += collectedToDate;
-      clientRow.overdue += overdue;
-
-      // Totals
-      groupEntry.totals.overdue += overdue;
-      officerEntry.totals.overdue += overdue;
-      grandTotalOverdue += overdue;
+    let expectedToDate = 0;
+    if (weeklyPerLoan > 0 && disbDate && disbDate <= overdueEnd) {
+      const occToDate = weeksBetween(disbDate, overdueEnd);
+      expectedToDate = occToDate * weeklyPerLoan;
     }
+    const collectedToDate = collections
+      .filter(c => c && c.collectionDate && new Date(c.collectionDate) <= endDate)
+      .reduce((s, c) => s + num(c.fieldCollection), 0);
+    const overdue = Math.max(expectedToDate - collectedToDate, 0);
+
+    // Accumulate into client (in case multiple loans per member under same group/officer)
+    clientRow.expectedToDate += expectedToDate;
+    clientRow.collectedToDate += collectedToDate;
+    clientRow.overdue += overdue;
+
+    // Totals
+    groupEntry.totals.overdue += overdue;
+    officerEntry.totals.overdue += overdue;
+    grandTotalOverdue += overdue;
   }
 
   const buildMs = Date.now() - buildStart;
