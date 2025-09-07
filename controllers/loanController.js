@@ -141,6 +141,12 @@ exports.createLoan = async (req, res) => {
           groupInfo: { group: loan.group, groupName: groupData.groupName, groupCode: groupData.groupCode },
           updateSource: 'loanApproval',
         });
+        // Tally this disbursed loan amount into the group's cumulative total
+        try {
+          await Group.findByIdAndUpdate(loan.group, { $inc: { groupTotalLoanAmount: Number(loan.loanAmount || 0) } });
+        } catch (eInc) {
+          console.error('[GROUP] Failed to increment groupTotalLoanAmount on create(active)', eInc);
+        }
         // Also auto-deposit security deposit into group's savings account
         const security = Number(loan.securityDeposit || 0);
         if (security > 0) {
@@ -269,6 +275,13 @@ exports.setLoanStatus = async (req, res) => {
           },
           updateSource: 'loanApproval',
         });
+        // Increment group's total loan amount tally once on activation
+        try {
+          const grpId = (loan.group && loan.group._id) ? loan.group._id : loan.group;
+          await Group.findByIdAndUpdate(grpId, { $inc: { groupTotalLoanAmount: Number(loan.loanAmount || 0) } });
+        } catch (eInc) {
+          console.error('[GROUP] Failed to increment groupTotalLoanAmount on status activate', eInc);
+        }
       }
     } catch (e) {
       console.error('[SNAPSHOT] incrementForLoanApproval (status change) failed', e);

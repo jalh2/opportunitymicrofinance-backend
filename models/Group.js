@@ -34,6 +34,11 @@ const groupSchema = new mongoose.Schema({
     enum: ['Active', 'Inactive', 'Pending'],
     default: 'Pending'
   },
+  // Cumulative tally of all loans disbursed to members of this group
+  groupTotalLoanAmount: {
+    type: Number,
+    default: 0
+  },
   totalLoans: {
     type: Number,
     default: 0

@@ -38,7 +38,7 @@ exports.createDistribution = async (req, res) => {
       return res.status(400).json({ message: 'Invalid loan id' });
     }
 
-    const loan = await Loan.findById(id).select('group currency status branchName branchCode');
+    const loan = await Loan.findById(id).select('group currency status branchName branchCode client');
     if (!loan) {
       return res.status(404).json({ message: 'Loan not found' });
     }
@@ -48,6 +48,13 @@ exports.createDistribution = async (req, res) => {
 
     const groupId = loan.group;
     const currency = loan.currency;
+    // Resolve borrower (client) for this loan if present
+    let borrower = null;
+    try {
+      if (loan.client) {
+        borrower = await Client.findById(loan.client).select('memberName');
+      }
+    } catch (_) { borrower = null; }
 
     const normalize = (entry) => {
       const amount = Number(entry.amount || 0);
@@ -62,11 +69,21 @@ exports.createDistribution = async (req, res) => {
       if (payloadCurrency !== currency) {
         throw new Error(`Distribution currency ${payloadCurrency} does not match loan currency ${currency}`);
       }
+      // Per new policy: if the loan has a borrower, all distributions must go to that borrower only
+      let memberId = undefined;
+      let memberName = undefined;
+      if (loan.client) {
+        memberId = loan.client;
+        memberName = (borrower && borrower.memberName) ? borrower.memberName : (entry.memberName || '');
+      } else {
+        memberId = (entry.member && mongoose.Types.ObjectId.isValid(entry.member)) ? entry.member : undefined;
+        memberName = entry.memberName || (entry.memberName === '' ? '' : undefined);
+      }
       return {
         loan: id,
         group: groupId,
-        member: entry.member && mongoose.Types.ObjectId.isValid(entry.member) ? entry.member : undefined,
-        memberName: entry.memberName || (entry.memberName === '' ? '' : undefined),
+        member: memberId,
+        memberName,
         amount,
         currency: payloadCurrency,
         date: entry.date ? new Date(entry.date) : new Date(),
