@@ -6,6 +6,7 @@ const Loan = require('../models/Loan');
 const SavingsAccount = require('../models/Savings');
 const Expense = require('../models/Expense');
 const PersonalSavingsAccount = require('../models/PersonalSavings');
+const BankDepositAccount = require('../models/BankDepositSaving');
 const Group = require('../models/Group');
 const Client = require('../models/Client');
 
@@ -238,6 +239,19 @@ exports.computeDailySnapshot = async (req, res) => {
     ]);
     const expenses = expenseAgg[0] || { totalExpenses: 0 };
 
+    // 5b) Bank Deposit Saving balance (as-of): sum of currentBalance across all branches for this currency
+    let bankDepositSavingTotal = 0;
+    try {
+      const bankAgg = await BankDepositAccount.aggregate([
+        { $match: { currency } },
+        { $group: { _id: null, total: { $sum: { $ifNull: ['$currentBalance', 0] } } } }
+      ]);
+      bankDepositSavingTotal = (bankAgg[0] && bankAgg[0].total) || 0;
+    } catch (e) {
+      try { console.error('[SNAPSHOT] bankDepositSaving aggregation failed', e); } catch (_) {}
+      bankDepositSavingTotal = 0;
+    }
+
     // Profit (simplified): interest + fees + admissionFees - expenses
     // Keep core (loan) fees separate to avoid double-counting when computing profit
     const coreFeesCollected = (dailyCol.fees || 0);
@@ -277,6 +291,7 @@ exports.computeDailySnapshot = async (req, res) => {
       branchShortage: shortageToday,
       entityShortage: shortageToday,
       badDebt: badDebtRow.badDebt || 0,
+      bankDepositSaving: bankDepositSavingTotal,
     };
 
     const now = new Date();
@@ -311,6 +326,7 @@ exports.computeDailySnapshot = async (req, res) => {
       'metrics.branchShortage': metrics.branchShortage,
       'metrics.entityShortage': metrics.entityShortage,
       'metrics.badDebt': metrics.badDebt,
+      'metrics.bankDepositSaving': metrics.bankDepositSaving,
       'metrics.updatedAt': now,
     };
 

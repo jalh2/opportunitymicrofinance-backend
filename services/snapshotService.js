@@ -75,6 +75,8 @@ async function incrementMetrics({
   if (inc.branchShortage) $inc['metrics.branchShortage'] = safe(inc.branchShortage);
   if (inc.entityShortage) $inc['metrics.entityShortage'] = safe(inc.entityShortage);
   if (inc.badDebt) $inc['metrics.badDebt'] = safe(inc.badDebt);
+  // Bank deposit saving (as-of balance; can be adjusted incrementally and recomputed in daily compute)
+  if (inc.bankDepositSaving) $inc['metrics.bankDepositSaving'] = safe(inc.bankDepositSaving);
 
   const now = new Date();
   // Build $set block with required fields first

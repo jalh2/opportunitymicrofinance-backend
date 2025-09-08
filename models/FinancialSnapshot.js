@@ -30,6 +30,8 @@ const metricsSchema = new mongoose.Schema({
   entityShortage: { type: Number, default: 0 },
   // Bad debt (as-of): outstanding principal for defaulted loans
   badDebt: { type: Number, default: 0 },
+  // As-of: total bank deposit saving balance across all branches (currency-scoped)
+  bankDepositSaving: { type: Number, default: 0 },
 }, { _id: false, timestamps: true });
 
 const financialSnapshotSchema = new mongoose.Schema({
