@@ -45,6 +45,7 @@ app.use('/api/branches', require('./routes/branchRoutes'));
 app.use('/api/financial-summary', require('./routes/financialSummaryRoutes'));
 app.use('/api/snapshots', require('./routes/snapshotRoutes'));
 app.use('/api/bank-deposit-savings', require('./routes/bankDepositRoutes'));
+app.use('/api/metrics', require('./routes/metricsRoutes'));
 
 // MongoDB Connection
 const PORT = process.env.PORT || 5000;

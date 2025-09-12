@@ -1,6 +1,6 @@
 const Expense = require('../models/Expense');
 const User = require('../models/User');
-const snapshotService = require('../services/snapshotService');
+const metricService = require('../services/metricService');
 
 // Create a new expense
 exports.createExpense = async (req, res) => {
@@ -23,11 +23,11 @@ exports.createExpense = async (req, res) => {
     await expense.save();
     await expense.populate('recordedBy approvedBy', 'name email');
     
-    // Update financial snapshot metrics (soft-fail)
+    // Record metrics (soft-fail)
     try {
       const amount = Number(expense.amount || 0);
       if (Number.isFinite(amount) && amount !== 0) {
-        await snapshotService.incrementMetrics({
+        await metricService.incrementMetrics({
           branchName: branchName,
           branchCode: branchCode,
           currency: expense.currency || 'LRD',
@@ -40,11 +40,13 @@ exports.createExpense = async (req, res) => {
           updatedBy: user.id || null,
           updatedByName: user.username || '',
           updatedByEmail: user.email || '',
+          // rich context
+          loanOfficerName: user.username || '',
           updateSource: 'expense',
         });
       }
     } catch (e) {
-      console.error('[SNAPSHOT] expense increment failed', e);
+      console.error('[METRICS] expense increment failed', e);
     }
     
     res.status(201).json(expense);

@@ -6,7 +6,8 @@ const {
   getGroupById,
   updateGroup,
   deleteGroup,
-  searchClientsByGroup
+  searchClientsByGroup,
+  setLeader
 } = require('../controllers/groupController');
 
 // @route   POST api/groups
@@ -28,6 +29,10 @@ router.get('/:id/clients', searchClientsByGroup);
 // @route   PUT api/groups/:id
 // @desc    Update a group
 router.put('/:id', updateGroup);
+
+// @route   PUT api/groups/:id/leader
+// @desc    Set or unset the group leader
+router.put('/:id/leader', setLeader);
 
 // @route   DELETE api/groups/:id
 // @desc    Delete a group

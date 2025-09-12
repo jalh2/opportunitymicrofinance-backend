@@ -19,6 +19,10 @@ const groupSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Client'
   }],
+  leader: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Client'
+  },
   loanOfficer: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -28,6 +32,47 @@ const groupSchema = new mongoose.Schema({
   },
   meetingTime: {
     type: String
+  },
+  // Group leadership information
+  presidentName: {
+    type: String,
+    trim: true
+  },
+  presidentNumber: {
+    type: String,
+    trim: true
+  },
+  securityName: {
+    type: String,
+    trim: true
+  },
+  securityNumber: {
+    type: String,
+    trim: true
+  },
+  treasurerName: {
+    type: String,
+    trim: true
+  },
+  treasurerNumber: {
+    type: String,
+    trim: true
+  },
+  police1Name: {
+    type: String,
+    trim: true
+  },
+  police1Number: {
+    type: String,
+    trim: true
+  },
+  police2Name: {
+    type: String,
+    trim: true
+  },
+  police2Number: {
+    type: String,
+    trim: true
   },
   status: {
     type: String,

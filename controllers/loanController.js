@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const Loan = require('../models/Loan');
 const Client = require('../models/Client');
 const Group = require('../models/Group');
-const snapshotService = require('../services/snapshotService');
+const metricService = require('../services/metricService');
 const SavingsAccount = require('../models/Savings');
 
 // Create a new loan application
@@ -110,7 +110,7 @@ exports.createLoan = async (req, res) => {
     try {
       const principal = Number(loan.loanAmount || 0);
       const appraisalFee = Math.round(principal * 0.02 * 100) / 100;
-      await snapshotService.incrementMetrics({
+      await metricService.incrementMetrics({
         branchName: loan.branchName,
         branchCode: loan.branchCode,
         currency: loan.currency,
@@ -126,6 +126,10 @@ exports.createLoan = async (req, res) => {
         updatedBy: req.user && req.user.id ? req.user.id : null,
         updatedByName: req.user && req.user.username ? req.user.username : '',
         updatedByEmail: req.user && req.user.email ? req.user.email : '',
+        // rich context
+        loan: loan._id || null,
+        client: loan.client || null,
+        loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
         updateSource: 'loanCreate',
       });
     } catch (e) {
@@ -134,7 +138,7 @@ exports.createLoan = async (req, res) => {
     // If loan is created already active, increment snapshot for approval day
     try {
       if (status === 'active') {
-        await snapshotService.incrementForLoanApproval({
+        await metricService.incrementForLoanApproval({
           loan,
           date: new Date(),
           user: req.user || null,
@@ -176,7 +180,7 @@ exports.createLoan = async (req, res) => {
           await account.save();
 
           try {
-            await snapshotService.incrementMetrics({
+            await metricService.incrementMetrics({
               branchName: loan.branchName,
               branchCode: loan.branchCode,
               currency: account.currency || 'LRD',
@@ -194,6 +198,10 @@ exports.createLoan = async (req, res) => {
               updatedBy: (req.user && req.user.id) || null,
               updatedByName: (req.user && req.user.username) || '',
               updatedByEmail: (req.user && req.user.email) || '',
+              // rich context
+              loan: loan._id || null,
+              client: loan.client || null,
+              loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
               updateSource: 'securityDepositOnApproval',
             });
           } catch (e2) {
@@ -264,7 +272,7 @@ exports.setLoanStatus = async (req, res) => {
     // If status just transitioned to 'active', increment snapshot for approval
     try {
       if (prevStatus !== 'active' && status === 'active') {
-        await snapshotService.incrementForLoanApproval({
+        await metricService.incrementForLoanApproval({
           loan,
           date: new Date(),
           user: req.user || null,
@@ -319,7 +327,7 @@ exports.setLoanStatus = async (req, res) => {
           // Update financial snapshots for this security deposit
           try {
             const grp = loan.group;
-            await snapshotService.incrementMetrics({
+            await metricService.incrementMetrics({
               branchName: loan.branchName,
               branchCode: loan.branchCode,
               currency: account.currency || 'LRD',
@@ -338,6 +346,10 @@ exports.setLoanStatus = async (req, res) => {
               updatedBy: (req.user && req.user.id) || null,
               updatedByName: (req.user && req.user.username) || '',
               updatedByEmail: (req.user && req.user.email) || '',
+              // rich context
+              loan: loan._id || null,
+              client: loan.client || null,
+              loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
               updateSource: 'securityDepositOnApproval',
             });
           } catch (e2) {
@@ -497,7 +509,7 @@ exports.addCollection = async (req, res) => {
               }
             } catch (_) {}
           }
-          await snapshotService.incrementForCollection({
+          await metricService.incrementForCollection({
             loan,
             entry,
             user: req.user || null,
@@ -596,7 +608,7 @@ exports.addCollectionsBatch = async (req, res) => {
         } catch (_) {}
       }
       await Promise.all((enrichedEntries || []).map((entry) =>
-        snapshotService.incrementForCollection({
+        metricService.incrementForCollection({
           loan,
           entry,
           user: req.user || null,

@@ -3,7 +3,7 @@ const Distribution = require('../models/Distribution');
 const Loan = require('../models/Loan');
 const Group = require('../models/Group');
 const Client = require('../models/Client');
-const snapshotService = require('../services/snapshotService');
+const metricService = require('../services/metricService');
 
 // GET /api/loans/:id/distributions
 exports.getDistributionsByLoan = async (req, res) => {
@@ -102,7 +102,7 @@ exports.createDistribution = async (req, res) => {
       created = await Distribution.create(payload);
     }
 
-    // Update financial snapshot: increment waiting-to-be-collected by the distributed principal amount(s)
+    // Record metrics: increment waiting-to-be-collected by the distributed principal amount(s)
     try {
       const arr = Array.isArray(created) ? created : [created];
       const totalAmt = arr.reduce((s, d) => s + Number(d.amount || 0), 0);
@@ -120,7 +120,7 @@ exports.createDistribution = async (req, res) => {
             }
           } catch (_) {}
         }
-        await snapshotService.incrementMetrics({
+        await metricService.incrementMetrics({
           branchName: loan.branchName || '',
           branchCode: loan.branchCode || '',
           currency: loan.currency,
@@ -133,12 +133,16 @@ exports.createDistribution = async (req, res) => {
           updatedBy: (req.user && req.user.id) || null,
           updatedByName: (req.user && req.user.username) || '',
           updatedByEmail: (req.user && req.user.email) || '',
+          // rich context
+          loan: loan._id || null,
+          client: loan.client || null,
+          loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
           updateSource: 'distribution',
         });
       }
     } catch (e) {
       // Non-fatal: log and continue
-      console.error('[DISTRIBUTIONS] snapshot increment failed', e);
+      console.error('[DISTRIBUTIONS] metrics increment failed', e);
     }
 
     // Return refreshed list for the loan

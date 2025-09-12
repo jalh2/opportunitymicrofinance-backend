@@ -2,7 +2,7 @@ const Client = require('../models/Client');
 const Group = require('../models/Group');
 const mongoose = require('mongoose');
 const Counter = require('../models/Counter');
-const snapshotService = require('../services/snapshotService');
+const metricService = require('../services/metricService');
 
 // Register a new client
 exports.registerClient = async (req, res) => {
@@ -64,7 +64,7 @@ exports.registerClient = async (req, res) => {
     // Admission fee: LRD 1,000 collected at registration
     try {
       const fee = 1000;
-      await snapshotService.incrementMetrics({
+      await metricService.incrementMetrics({
         branchName: resolvedBranchName || '',
         branchCode: resolvedBranchCode || '',
         currency: 'LRD',
@@ -81,10 +81,13 @@ exports.registerClient = async (req, res) => {
         updatedBy: (req.user && req.user.id) || null,
         updatedByName: (req.user && req.user.username) || '',
         updatedByEmail: (req.user && req.user.email) || '',
+        // rich context
+        client: client._id,
+        loanOfficerName: (req.user && req.user.username) || '',
         updateSource: 'clientRegistration',
       });
     } catch (e) {
-      console.warn('[CLIENTS] registerClient: snapshot admission fee increment failed', e.message);
+      console.warn('[CLIENTS] registerClient: metrics admission fee increment failed', e.message);
       // Do not fail client creation if snapshot update fails
     }
 
@@ -154,13 +157,18 @@ exports.deleteClient = async (req, res) => {
       return res.status(404).json({ message: 'Client not found' });
     }
 
-    // Remove client from their group
+    // Remove client from their group; if they were leader, unset leader
     if (client.group && mongoose.Types.ObjectId.isValid(client.group)) {
       try {
+        const g = await Group.findById(client.group).select('leader');
         await Group.updateOne({ _id: client.group }, { $pull: { clients: client._id } });
+        if (g && g.leader && String(g.leader) === String(client._id)) {
+          await Group.updateOne({ _id: client.group }, { $unset: { leader: "" } });
+          console.log('[CLIENTS] deleteClient: unset group leader', { groupId: client.group?.toString?.() });
+        }
         console.log('[CLIENTS] deleteClient: removed from group.clients', { groupId: client.group?.toString?.() });
       } catch (e) {
-        console.warn('[CLIENTS] deleteClient: failed to update group membership', { error: e.message });
+        console.warn('[CLIENTS] deleteClient: failed to update group membership/leader', { error: e.message });
       }
     } else {
       console.log('[CLIENTS] deleteClient: no valid group to update');

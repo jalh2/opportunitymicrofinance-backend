@@ -1,5 +1,5 @@
 const BranchData = require('../models/BranchData');
-const { incrementMetrics } = require('../services/snapshotService');
+const { incrementMetrics } = require('../services/metricService');
 
 // Helper to detect approver roles
 const isApprover = (user) => {
@@ -34,6 +34,8 @@ async function applySnapshotAdjustments(doc, user, source = 'branchDataManual') 
       updatedBy: user && user.id ? user.id : null,
       updatedByName: user && user.username ? user.username : '',
       updatedByEmail: user && user.email ? user.email : '',
+      // rich context
+      loanOfficerName: (user && user.username) || '',
       updateSource: source,
     });
     // Persist new appliedMetrics snapshot for idempotency

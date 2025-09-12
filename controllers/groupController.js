@@ -4,7 +4,9 @@ const mongoose = require('mongoose');
 
 // Create a new group
 exports.createGroup = async (req, res) => {
-  const { groupName, groupCode, branchName, branch, meetingDay, meetingSchedule, meetingTime, loanOfficer } = req.body;
+  const { groupName, groupCode, branchName, branch, meetingDay, meetingSchedule, meetingTime, loanOfficer,
+    presidentName, presidentNumber, securityName, securityNumber, treasurerName, treasurerNumber,
+    police1Name, police1Number, police2Name, police2Number } = req.body;
 
   try {
     let group = await Group.findOne({ groupCode });
@@ -22,7 +24,18 @@ exports.createGroup = async (req, res) => {
       branchName: normalizedBranchName,
       meetingDay: normalizedMeetingDay,
       meetingTime: meetingTime || '',
-      loanOfficer: loanOfficer || undefined
+      loanOfficer: loanOfficer || undefined,
+      // Leadership fields (optional)
+      presidentName,
+      presidentNumber,
+      securityName,
+      securityNumber,
+      treasurerName,
+      treasurerNumber,
+      police1Name,
+      police1Number,
+      police2Name,
+      police2Number,
     });
 
     await group.save();
@@ -36,7 +49,9 @@ exports.createGroup = async (req, res) => {
 // Get all groups
 exports.getAllGroups = async (req, res) => {
   try {
-    const groups = await Group.find().populate('clients', 'memberName passBookNumber'); // Populate client display fields
+    const groups = await Group.find()
+      .populate('clients', 'memberName passBookNumber')
+      .populate('leader', 'memberName passBookNumber'); // Include leader summary
     res.json(groups);
   } catch (error) {
     console.error(error.message);
@@ -47,7 +62,9 @@ exports.getAllGroups = async (req, res) => {
 // Get group by ID
 exports.getGroupById = async (req, res) => {
   try {
-    const group = await Group.findById(req.params.id).populate('clients');
+    const group = await Group.findById(req.params.id)
+      .populate('clients')
+      .populate('leader', 'memberName passBookNumber');
     if (!group) {
       return res.status(404).json({ message: 'Group not found' });
     }
@@ -61,7 +78,9 @@ exports.getGroupById = async (req, res) => {
 // Update a group
 exports.updateGroup = async (req, res) => {
   try {
-    const { groupName, branchName, branch, meetingDay, meetingSchedule, meetingTime, status, loanOfficer } = req.body;
+    const { groupName, branchName, branch, meetingDay, meetingSchedule, meetingTime, status, loanOfficer,
+      presidentName, presidentNumber, securityName, securityNumber, treasurerName, treasurerNumber,
+      police1Name, police1Number, police2Name, police2Number } = req.body;
 
     // Only allow updates to known fields, normalizing legacy names
     const updateData = {};
@@ -73,6 +92,17 @@ exports.updateGroup = async (req, res) => {
     if (meetingTime !== undefined) updateData.meetingTime = meetingTime;
     if (status !== undefined) updateData.status = status;
     if (loanOfficer !== undefined) updateData.loanOfficer = loanOfficer;
+    // Leadership fields (optional)
+    if (presidentName !== undefined) updateData.presidentName = presidentName;
+    if (presidentNumber !== undefined) updateData.presidentNumber = presidentNumber;
+    if (securityName !== undefined) updateData.securityName = securityName;
+    if (securityNumber !== undefined) updateData.securityNumber = securityNumber;
+    if (treasurerName !== undefined) updateData.treasurerName = treasurerName;
+    if (treasurerNumber !== undefined) updateData.treasurerNumber = treasurerNumber;
+    if (police1Name !== undefined) updateData.police1Name = police1Name;
+    if (police1Number !== undefined) updateData.police1Number = police1Number;
+    if (police2Name !== undefined) updateData.police2Name = police2Name;
+    if (police2Number !== undefined) updateData.police2Number = police2Number;
 
     const group = await Group.findByIdAndUpdate(req.params.id, updateData, { new: true });
     if (!group) {
@@ -127,4 +157,51 @@ exports.searchClientsByGroup = async (req, res) => {
         console.error(error.message);
         res.status(500).send('Server error');
     }
+};
+
+// Set or unset group leader
+exports.setLeader = async (req, res) => {
+  try {
+    const { id } = req.params; // group id
+    const { clientId } = req.body; // may be undefined/null to unset
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid group id' });
+    }
+
+    const group = await Group.findById(id).select('clients leader');
+    if (!group) {
+      return res.status(404).json({ message: 'Group not found' });
+    }
+
+    // Unset leader
+    if (!clientId) {
+      group.leader = undefined;
+      await group.save();
+      const populated = await Group.findById(id)
+        .populate('clients', 'memberName passBookNumber')
+        .populate('leader', 'memberName passBookNumber');
+      return res.json(populated);
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(clientId)) {
+      return res.status(400).json({ message: 'Invalid client id' });
+    }
+
+    const isMember = Array.isArray(group.clients) && group.clients.some(c => String(c) === String(clientId));
+    if (!isMember) {
+      return res.status(400).json({ message: 'Client does not belong to this group' });
+    }
+
+    group.leader = clientId;
+    await group.save();
+
+    const populated = await Group.findById(id)
+      .populate('clients', 'memberName passBookNumber')
+      .populate('leader', 'memberName passBookNumber');
+    res.json(populated);
+  } catch (error) {
+    console.error('[GROUPS] setLeader error:', error.stack || error.message);
+    res.status(500).json({ message: error.message || 'Server error' });
+  }
 };

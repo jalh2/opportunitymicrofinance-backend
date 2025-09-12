@@ -1,6 +1,6 @@
 const BankDepositAccount = require('../models/BankDepositSaving');
 const User = require('../models/User');
-const snapshotService = require('../services/snapshotService');
+const metricService = require('../services/metricService');
 
 // Ensure an account exists for the provided branch (by code/name)
 async function ensureAccount({ branchName, branchCode, currency = 'LRD' }) {
@@ -124,11 +124,11 @@ exports.addTransaction = async (req, res) => {
     acct.currentBalance = newBal;
     await acct.save();
 
-    // Snapshot increment (soft-fail)
+    // Record metrics (soft-fail)
     try {
       const branchName = (req.user && req.user.branch) || acct.branchName || '';
       const branchCode = (req.user && req.user.branchCode) || acct.branchCode || '';
-      await snapshotService.incrementMetrics({
+      await metricService.incrementMetrics({
         branchName,
         branchCode,
         currency: acct.currency,
@@ -137,10 +137,12 @@ exports.addTransaction = async (req, res) => {
         updatedBy: (req.user && req.user.id) || null,
         updatedByName: (req.user && req.user.username) || '',
         updatedByEmail: (req.user && req.user.email) || '',
+        // rich context
+        loanOfficerName: (req.user && req.user.username) || '',
         updateSource: 'bankDepositTransaction',
       });
     } catch (err) {
-      console.error('[SNAPSHOT] bank deposit increment failed', err);
+      console.error('[METRICS] bank deposit increment failed', err);
     }
 
     res.status(201).json(acct);

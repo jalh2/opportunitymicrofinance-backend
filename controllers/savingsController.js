@@ -1,7 +1,7 @@
 const SavingsAccount = require('../models/Savings');
 const Client = require('../models/Client');
 const Group = require('../models/Group');
-const snapshotService = require('../services/snapshotService');
+const metricService = require('../services/metricService');
 
 // Create a new savings account for a group (legacy support: clientId -> derive group)
 exports.createSavingsAccount = async (req, res) => {
@@ -136,7 +136,7 @@ exports.addTransaction = async (req, res) => {
 
         await account.save();
 
-        // Update financial snapshot metrics (soft-fail if it errors)
+        // Record metrics (soft-fail if it errors)
         try {
           // Source branch identity from authenticated user first (most reliable), then fall back
           const branchName = (req.user && req.user.branch) ||
@@ -165,7 +165,7 @@ exports.addTransaction = async (req, res) => {
             inc.totalSecuritySavingsBalance = balanceChange;
           }
 
-          await snapshotService.incrementMetrics({
+          await metricService.incrementMetrics({
             branchName,
             branchCode,
             currency: account.currency || 'LRD',
@@ -178,10 +178,13 @@ exports.addTransaction = async (req, res) => {
             updatedBy: (req.user && req.user.id) || null,
             updatedByName: (req.user && req.user.username) || '',
             updatedByEmail: (req.user && req.user.email) || '',
+            // rich context
+            client: (txClient && txClient._id) || undefined,
+            loanOfficerName: (req.user && req.user.username) || '',
             updateSource: 'savingsTransaction',
           });
         } catch (e) {
-          console.error('[SNAPSHOT] savings increment failed', e);
+          console.error('[METRICS] savings increment failed', e);
         }
 
         res.status(201).json(account);
