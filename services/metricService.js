@@ -156,6 +156,10 @@ async function incrementForCollection({ loan, entry, user = null, groupInfo = nu
     totalWaitingToBeCollected: waitingDelta,
     totalProfit: profit,
   };
+  // Record unified shortage metric (amount left to be paid for this collection) — positive only
+  if (arrearsDelta > 0) {
+    inc.shortage = (inc.shortage || 0) + arrearsDelta;
+  }
   if (arrearsDelta) inc.totalOverdue = (inc.totalOverdue || 0) + arrearsDelta;
   if (overdueDelta) inc.totalOverdue = (inc.totalOverdue || 0) + overdueDelta;
 

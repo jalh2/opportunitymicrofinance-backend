@@ -8,7 +8,8 @@ const {
   deleteLoan,
   addCollection,
   addCollectionsBatch,
-  setLoanStatus
+  setLoanStatus,
+  listCollectionsDue
 } = require('../controllers/loanController');
 const { identifyUserFromHeader, authorizeRoles } = require('../middleware/authMiddleware');
 const { getDistributionsByLoan, createDistribution } = require('../controllers/distributionController');
@@ -20,6 +21,15 @@ router.post('/', createLoan);
 // @route   GET api/loans
 // @desc    Get all loans
 router.get('/', getAllLoans);
+
+// @route   GET api/loans/collections-due
+// @desc    List loans due for collection within a date range
+router.get(
+  '/collections-due',
+  identifyUserFromHeader,
+  authorizeRoles('admin', 'manager', 'branch head', 'staff', 'loan officer', 'field agent'),
+  listCollectionsDue
+);
 
 // @route   GET api/loans/:id
 // @desc    Get loan by ID

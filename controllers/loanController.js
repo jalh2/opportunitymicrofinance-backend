@@ -223,6 +223,135 @@ exports.createLoan = async (req, res) => {
   }
 };
 
+// List loans that have a scheduled collection falling within a date range
+// GET /api/loans/collections-due?branchName=...&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&currency=USD|LRD
+exports.listCollectionsDue = async (req, res) => {
+  try {
+    const { branchName, startDate, endDate, currency } = req.query;
+    if (!branchName || !startDate || !endDate) {
+      return res.status(400).json({ message: 'branchName, startDate and endDate are required' });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ message: 'Invalid startDate or endDate' });
+    }
+    if (start > end) {
+      return res.status(400).json({ message: 'startDate must be before endDate' });
+    }
+
+    // Build base query: active loans for this branch overlapping the period
+    const loanQuery = {
+      status: 'active',
+      branchName,
+      disbursementDate: { $lte: end },
+      $or: [
+        { endingDate: { $exists: false } },
+        { endingDate: null },
+        { endingDate: { $gte: start } },
+      ],
+    };
+    if (currency) loanQuery.currency = currency;
+
+    const loans = await Loan.find(loanQuery)
+      .populate('group', 'groupName groupCode meetingDay')
+      .populate('client', 'memberName passBookNumber')
+      .select('group client weeklyInstallment disbursementDate endingDate meetingDay branchName branchCode currency collections loanOfficerName');
+
+    // Map weekday names to indices (0=Sun..6=Sat)
+    const dayIndexMap = { sunday:0, monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6 };
+    const msPerDay = 24 * 60 * 60 * 1000;
+
+    const items = [];
+    for (const loan of loans) {
+      const expectedPerWeek = Math.max(Number(loan.weeklyInstallment || 0), 0);
+      if (!(expectedPerWeek > 0)) continue;
+
+      const loanStart = loan.disbursementDate ? new Date(loan.disbursementDate) : start;
+      const loanEnd = loan.endingDate ? new Date(loan.endingDate) : end;
+      const overlaps = loanStart <= end && loanEnd >= start;
+      if (!overlaps) continue;
+
+      // Determine the scheduled due date within [start, end]
+      let dueDateKey = null;
+      let meetingIdx = null;
+      if (loan.meetingDay || (loan.group && loan.group.meetingDay)) {
+        const md = String(loan.meetingDay || (loan.group && loan.group.meetingDay) || '').toLowerCase();
+        meetingIdx = dayIndexMap[md];
+      }
+      if (meetingIdx != null) {
+        for (let d = new Date(start.getFullYear(), start.getMonth(), start.getDate()); d <= end; d = new Date(d.getTime() + msPerDay)) {
+          if (d.getDay() === meetingIdx) {
+            const activeOnDay = (!loan.disbursementDate || d >= loanStart) && (!loan.endingDate || d <= loanEnd);
+            if (activeOnDay) {
+              dueDateKey = d.toISOString().slice(0, 10);
+              break;
+            }
+          }
+        }
+      }
+      if (!dueDateKey) {
+        // Fallback: first active day within the window
+        for (let d = new Date(start.getFullYear(), start.getMonth(), start.getDate()); d <= end; d = new Date(d.getTime() + msPerDay)) {
+          const activeOnDay = (!loan.disbursementDate || d >= loanStart) && (!loan.endingDate || d <= loanEnd);
+          if (activeOnDay) {
+            dueDateKey = d.toISOString().slice(0, 10);
+            break;
+          }
+        }
+      }
+      if (!dueDateKey) continue;
+
+      // Sum collections that occurred on the due date (currency-checked if filter provided)
+      let collectedOnDueDate = 0;
+      if (Array.isArray(loan.collections)) {
+        for (const c of loan.collections) {
+          if (!c || !c.collectionDate) continue;
+          if (currency && c.currency && c.currency !== currency) continue;
+          const key = new Date(c.collectionDate).toISOString().slice(0, 10);
+          if (key === dueDateKey) {
+            collectedOnDueDate += Number(c.fieldCollection || 0);
+          }
+        }
+      }
+
+      const shortage = Math.max(expectedPerWeek - collectedOnDueDate, 0);
+
+      items.push({
+        loanId: String(loan._id),
+        groupId: loan.group && (loan.group._id || loan.group),
+        groupName: (loan.group && loan.group.groupName) || '',
+        groupCode: (loan.group && loan.group.groupCode) || '',
+        clientId: loan.client && (loan.client._id || loan.client),
+        clientName: loan.client && loan.client.memberName ? loan.client.memberName : '',
+        branchName: loan.branchName,
+        branchCode: loan.branchCode,
+        currency: loan.currency || null,
+        meetingDay: loan.meetingDay || (loan.group && loan.group.meetingDay) || null,
+        loanOfficerName: loan.loanOfficerName || '',
+        dueDate: dueDateKey,
+        expected: Math.round(expectedPerWeek * 100) / 100,
+        collected: Math.round(collectedOnDueDate * 100) / 100,
+        shortage: Math.round(shortage * 100) / 100,
+      });
+    }
+
+    // Sort by dueDate ascending then by groupName then clientName
+    items.sort((a, b) => {
+      if (a.dueDate !== b.dueDate) return a.dueDate < b.dueDate ? 1 * -1 : 1;
+      const gcmp = String(a.groupName || '').localeCompare(String(b.groupName || ''));
+      if (gcmp !== 0) return gcmp;
+      return String(a.clientName || '').localeCompare(String(b.clientName || ''));
+    });
+
+    return res.status(200).json({ branchName, currency: currency || null, startDate: start.toISOString(), endDate: end.toISOString(), items });
+  } catch (error) {
+    console.error('[listCollectionsDue] error:', error);
+    return res.status(500).json({ message: 'Error listing collections due', error: error.message || 'Unknown error' });
+  }
+};
+
 // Update loan status (e.g., approve -> active) and compute weekly per-member installment on approval
 exports.setLoanStatus = async (req, res) => {
   try {
