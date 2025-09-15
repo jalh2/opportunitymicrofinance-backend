@@ -257,11 +257,22 @@ exports.listCollectionsDue = async (req, res) => {
     const loans = await Loan.find(loanQuery)
       .populate('group', 'groupName groupCode meetingDay')
       .populate('client', 'memberName passBookNumber')
-      .select('group client weeklyInstallment disbursementDate endingDate meetingDay branchName branchCode currency collections loanOfficerName');
+      .select('group client weeklyInstallment disbursementDate endingDate meetingDay branchName branchCode currency collections loanOfficerName loanAmount loanDurationNumber loanDurationUnit interestRate');
 
     // Map weekday names to indices (0=Sun..6=Sat)
     const dayIndexMap = { sunday:0, monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6 };
     const msPerDay = 24 * 60 * 60 * 1000;
+    // helper to convert duration to weeks
+    const toWeeks = (n, unit) => {
+      const num = Number(n || 0);
+      switch (unit) {
+        case 'days': return Math.max(Math.ceil(num / 7), 0);
+        case 'weeks': return Math.max(num, 0);
+        case 'months': return Math.max(num * 4, 0);
+        case 'years': return Math.max(num * 52, 0);
+        default: return Math.max(num, 0);
+      }
+    };
 
     const items = [];
     for (const loan of loans) {
@@ -316,7 +327,31 @@ exports.listCollectionsDue = async (req, res) => {
         }
       }
 
-      const shortage = Math.max(expectedPerWeek - collectedOnDueDate, 0);
+      // Overdue for the due date (same-day shortage semantics, renamed)
+      const overdue = Math.max(expectedPerWeek - collectedOnDueDate, 0);
+
+      // Compute remaining total repayable balance as of the due date (inclusive)
+      // Total repayable = weeklyInstallment * weeks (when weeks>0), otherwise loanAmount * (1 + interestRate/100)
+      // Collected to date = sum(fieldCollection) for all collections up to and including dueDateKey, currency-aligned
+      let collectedToDate = 0;
+      if (Array.isArray(loan.collections) && loan.collections.length > 0) {
+        for (const c of loan.collections) {
+          if (!c || !c.collectionDate) continue;
+          const key = new Date(c.collectionDate).toISOString().slice(0, 10);
+          if (key > dueDateKey) continue;
+          if (c.currency && loan.currency && c.currency !== loan.currency) continue;
+          collectedToDate += Number(c.fieldCollection || 0);
+        }
+      }
+      const weeks = toWeeks(loan.loanDurationNumber, loan.loanDurationUnit);
+      const ratePct = Number(loan.interestRate || 0);
+      const totalRepayableViaWeeks = (weeks > 0) ? (Number(loan.weeklyInstallment || 0) * weeks) : null;
+      const totalRepayableViaRate = Number(loan.loanAmount || 0) * (1 + (ratePct / 100));
+      const totalRepayable = Number.isFinite(totalRepayableViaWeeks) && totalRepayableViaWeeks > 0
+        ? totalRepayableViaWeeks
+        : totalRepayableViaRate;
+      const remaining = Number(totalRepayable || 0) - Number(collectedToDate || 0);
+      const loanBalance = Math.max(Math.round(remaining * 100) / 100, 0);
 
       items.push({
         loanId: String(loan._id),
@@ -333,7 +368,10 @@ exports.listCollectionsDue = async (req, res) => {
         dueDate: dueDateKey,
         expected: Math.round(expectedPerWeek * 100) / 100,
         collected: Math.round(collectedOnDueDate * 100) / 100,
-        shortage: Math.round(shortage * 100) / 100,
+        // keep 'shortage' for backward compatibility; prefer 'overdue'
+        shortage: Math.round(overdue * 100) / 100,
+        overdue: Math.round(overdue * 100) / 100,
+        loanBalance,
       });
     }
 
