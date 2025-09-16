@@ -47,6 +47,8 @@ const loanSchema = new mongoose.Schema({
   businessType: { type: String },
   disbursementDate: { type: Date, default: Date.now },
   endingDate: { type: Date },
+  // Optional: explicitly track when collections should start (can be set during distribution)
+  collectionStartDate: { type: Date },
   previousLoanInfo: { type: String },
   memberOccupation: { type: String },
   weeklyInstallment: { type: Number },
@@ -93,4 +95,5 @@ loanSchema.index({ branchName: 1, disbursementDate: -1 });
 loanSchema.index({ client: 1, disbursementDate: -1 });
 
 module.exports = mongoose.model('Loan', loanSchema);
+
 

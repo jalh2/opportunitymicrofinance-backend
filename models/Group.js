@@ -23,6 +23,15 @@ const groupSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Client'
   },
+  // Additional role assignments (as client refs)
+  secretary: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Client'
+  },
+  treasurer: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Client'
+  },
   loanOfficer: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -32,6 +41,16 @@ const groupSchema = new mongoose.Schema({
   },
   meetingTime: {
     type: String
+  },
+  // Location/community the group is situated in
+  community: {
+    type: String,
+    trim: true
+  },
+  // Total group count (declared size/capacity of the group)
+  totalGroupCount: {
+    type: Number,
+    default: 0
   },
   // Group leadership information
   presidentName: {

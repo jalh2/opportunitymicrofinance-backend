@@ -69,7 +69,7 @@ async function generateOverdueBreakdown({ branchName, loanOfficerId, month, year
   const loans = await Loan.find(loanQuery)
     .populate('group', 'groupName')
     .populate('client', 'memberName')
-    .select('group client weeklyInstallment disbursementDate endingDate loanOfficerName collections')
+    .select('group client weeklyInstallment disbursementDate collectionStartDate endingDate loanOfficerName collections')
     .maxTimeMS(30000)
     .lean();
   queryMs = Date.now() - t0;
@@ -98,6 +98,8 @@ async function generateOverdueBreakdown({ branchName, loanOfficerId, month, year
 
     // Per-loan constants
     const disbDate = loan.disbursementDate ? new Date(loan.disbursementDate) : null;
+    const collStart = loan.collectionStartDate ? new Date(loan.collectionStartDate) : null;
+    const effectiveStart = collStart || disbDate;
     const endCap = loan.endingDate ? new Date(loan.endingDate) : endDate;
     const overdueEnd = endCap < endDate ? endCap : endDate;
     const weeklyPerLoan = num(loan.weeklyInstallment);
@@ -111,8 +113,8 @@ async function generateOverdueBreakdown({ branchName, loanOfficerId, month, year
     const clientRow = groupEntry.clients.get(memberName);
 
     let expectedToDate = 0;
-    if (weeklyPerLoan > 0 && disbDate && disbDate <= overdueEnd) {
-      const occToDate = weeksBetween(disbDate, overdueEnd);
+    if (weeklyPerLoan > 0 && effectiveStart && effectiveStart <= overdueEnd) {
+      const occToDate = weeksBetween(effectiveStart, overdueEnd);
       expectedToDate = occToDate * weeklyPerLoan;
     }
     const collectedToDate = collections

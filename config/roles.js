@@ -29,6 +29,7 @@ const roles = [
   'manager',
   'branch head',
   'staff',
+  'supervisor',
   'field agent',
   'loan officer',
   'customer service head',

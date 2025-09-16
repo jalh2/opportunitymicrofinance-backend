@@ -257,7 +257,7 @@ exports.listCollectionsDue = async (req, res) => {
     const loans = await Loan.find(loanQuery)
       .populate('group', 'groupName groupCode meetingDay')
       .populate('client', 'memberName passBookNumber')
-      .select('group client weeklyInstallment disbursementDate endingDate meetingDay branchName branchCode currency collections loanOfficerName loanAmount loanDurationNumber loanDurationUnit interestRate');
+      .select('group client weeklyInstallment disbursementDate collectionStartDate endingDate meetingDay branchName branchCode currency collections loanOfficerName loanAmount loanDurationNumber loanDurationUnit interestRate');
 
     // Map weekday names to indices (0=Sun..6=Sat)
     const dayIndexMap = { sunday:0, monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6 };
@@ -279,7 +279,9 @@ exports.listCollectionsDue = async (req, res) => {
       const expectedPerWeek = Math.max(Number(loan.weeklyInstallment || 0), 0);
       if (!(expectedPerWeek > 0)) continue;
 
-      const loanStart = loan.disbursementDate ? new Date(loan.disbursementDate) : start;
+      const loanStart = loan.collectionStartDate
+        ? new Date(loan.collectionStartDate)
+        : (loan.disbursementDate ? new Date(loan.disbursementDate) : start);
       const loanEnd = loan.endingDate ? new Date(loan.endingDate) : end;
       const overlaps = loanStart <= end && loanEnd >= start;
       if (!overlaps) continue;
@@ -353,6 +355,18 @@ exports.listCollectionsDue = async (req, res) => {
       const remaining = Number(totalRepayable || 0) - Number(collectedToDate || 0);
       const loanBalance = Math.max(Math.round(remaining * 100) / 100, 0);
 
+      // Overdue to date = cumulative expected up to due date (inclusive) minus collected to date
+      // Compute elapsed weeks since disbursement up to due date, capped by total weeks
+      const dueDateObj = new Date(dueDateKey);
+      const elapsedWeeksRaw = Math.floor(((dueDateObj - loanStart) / msPerDay) / 7) + 1; // inclusive of current week
+      const elapsedWeeks = Math.max(0, Math.min(weeks, elapsedWeeksRaw));
+      let expectedCumulative = Number(expectedPerWeek || 0) * elapsedWeeks;
+      if (Number.isFinite(totalRepayable) && totalRepayable > 0) {
+        expectedCumulative = Math.min(expectedCumulative, Number(totalRepayable || 0)); // cap by total repayable to handle rounding/remainder
+      }
+      expectedCumulative = Math.round(expectedCumulative * 100) / 100;
+      const overdueToDate = Math.max(expectedCumulative - Number(collectedToDate || 0), 0);
+
       items.push({
         loanId: String(loan._id),
         groupId: loan.group && (loan.group._id || loan.group),
@@ -371,6 +385,8 @@ exports.listCollectionsDue = async (req, res) => {
         // keep 'shortage' for backward compatibility; prefer 'overdue'
         shortage: Math.round(overdue * 100) / 100,
         overdue: Math.round(overdue * 100) / 100,
+        overdueToDate: Math.round(overdueToDate * 100) / 100,
+        loanAmount: Math.round(Number(loan.loanAmount || 0) * 100) / 100,
         loanBalance,
       });
     }

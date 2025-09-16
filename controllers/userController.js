@@ -178,6 +178,14 @@ exports.updateUser = async (req, res) => {
   if (branchCode) userFields.branchCode = branchCode;
 
   try {
+    // Basic sanitization for identity fields
+    if (userFields.username && typeof userFields.username === 'string') {
+      userFields.username = userFields.username.trim();
+    }
+    if (userFields.email && typeof userFields.email === 'string') {
+      userFields.email = userFields.email.trim().toLowerCase();
+    }
+
     let user = await User.findById(req.params.id);
 
     if (!user) {
@@ -187,13 +195,29 @@ exports.updateUser = async (req, res) => {
     user = await User.findByIdAndUpdate(
       req.params.id,
       { $set: userFields },
-      { new: true }
+      { new: true, runValidators: true, context: 'query' }
     ).select('-password');
 
-    res.json(user);
+    return res.json(user);
   } catch (error) {
-    console.error(error.message);
-    res.status(500).send('Server error');
+    console.error('[UPDATE USER] error', error);
+    if (error && error.code === 11000) {
+      const keys = Object.keys(error.keyPattern || error.keyValue || {});
+      if (keys.includes('email')) {
+        return res.status(400).json({ message: 'User with this email already exists in this branch' });
+      }
+      if (keys.includes('username')) {
+        return res.status(400).json({ message: 'Username already exists in this branch' });
+      }
+      return res.status(400).json({ message: 'Duplicate value for unique field', details: error.keyValue });
+    }
+    if (error && error.name === 'ValidationError') {
+      return res.status(400).json({ message: 'Validation error', details: error.errors });
+    }
+    if (error && (error.kind === 'ObjectId' || error.name === 'CastError')) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    return res.status(500).send('Server error');
   }
 };
 

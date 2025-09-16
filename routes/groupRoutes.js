@@ -7,7 +7,9 @@ const {
   updateGroup,
   deleteGroup,
   searchClientsByGroup,
-  setLeader
+  setLeader,
+  setSecretary,
+  setTreasurer
 } = require('../controllers/groupController');
 
 // @route   POST api/groups
@@ -33,6 +35,14 @@ router.put('/:id', updateGroup);
 // @route   PUT api/groups/:id/leader
 // @desc    Set or unset the group leader
 router.put('/:id/leader', setLeader);
+
+// @route   PUT api/groups/:id/secretary
+// @desc    Set or unset the group secretary (client ref)
+router.put('/:id/secretary', setSecretary);
+
+// @route   PUT api/groups/:id/treasurer
+// @desc    Set or unset the group treasurer (client ref)
+router.put('/:id/treasurer', setTreasurer);
 
 // @route   DELETE api/groups/:id
 // @desc    Delete a group

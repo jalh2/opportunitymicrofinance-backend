@@ -157,14 +157,24 @@ exports.deleteClient = async (req, res) => {
       return res.status(404).json({ message: 'Client not found' });
     }
 
-    // Remove client from their group; if they were leader, unset leader
+    // Remove client from their group; if they were leader/secretary/treasurer, unset those roles
     if (client.group && mongoose.Types.ObjectId.isValid(client.group)) {
       try {
-        const g = await Group.findById(client.group).select('leader');
+        const g = await Group.findById(client.group).select('leader secretary treasurer');
         await Group.updateOne({ _id: client.group }, { $pull: { clients: client._id } });
+        const unset = {};
         if (g && g.leader && String(g.leader) === String(client._id)) {
-          await Group.updateOne({ _id: client.group }, { $unset: { leader: "" } });
-          console.log('[CLIENTS] deleteClient: unset group leader', { groupId: client.group?.toString?.() });
+          unset.leader = "";
+        }
+        if (g && g.secretary && String(g.secretary) === String(client._id)) {
+          unset.secretary = "";
+        }
+        if (g && g.treasurer && String(g.treasurer) === String(client._id)) {
+          unset.treasurer = "";
+        }
+        if (Object.keys(unset).length > 0) {
+          await Group.updateOne({ _id: client.group }, { $unset: unset });
+          console.log('[CLIENTS] deleteClient: unset group roles', { groupId: client.group?.toString?.(), unset: Object.keys(unset) });
         }
         console.log('[CLIENTS] deleteClient: removed from group.clients', { groupId: client.group?.toString?.() });
       } catch (e) {

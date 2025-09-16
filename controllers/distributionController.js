@@ -38,7 +38,7 @@ exports.createDistribution = async (req, res) => {
       return res.status(400).json({ message: 'Invalid loan id' });
     }
 
-    const loan = await Loan.findById(id).select('group currency status branchName branchCode client');
+    const loan = await Loan.findById(id).select('group currency status branchName branchCode client loanOfficerName collectionStartDate');
     if (!loan) {
       return res.status(404).json({ message: 'Loan not found' });
     }
@@ -55,6 +55,10 @@ exports.createDistribution = async (req, res) => {
         borrower = await Client.findById(loan.client).select('memberName');
       }
     } catch (_) { borrower = null; }
+
+    // Parse optional flags for setting collection start date
+    const body = req.body || {};
+    const setStartFlag = body && (body.setCollectionStartDate === true || body.setCollectionStartDate === 'true' || body.setCollectionStartDate === 1 || body.setCollectionStartDate === '1');
 
     const normalize = (entry) => {
       const amount = Number(entry.amount || 0);
@@ -91,15 +95,41 @@ exports.createDistribution = async (req, res) => {
       };
     };
 
-    const { entries } = req.body || {};
+    const { entries } = body;
     let created;
 
     if (Array.isArray(entries) && entries.length > 0) {
       const docs = entries.map(normalize);
       created = await Distribution.insertMany(docs);
     } else {
-      const payload = normalize(req.body || {});
+      const payload = normalize(body || {});
       created = await Distribution.create(payload);
+    }
+
+    // Optionally set/override collectionStartDate on the loan
+    if (setStartFlag) {
+      try {
+        // Determine the start date: explicit body.collectionStartDate, earliest of entries[].date, or body.date
+        let startDate = null;
+        if (body.collectionStartDate) {
+          startDate = new Date(body.collectionStartDate);
+        } else if (Array.isArray(entries) && entries.length > 0) {
+          const dates = entries
+            .map(e => (e && e.date) ? new Date(e.date) : null)
+            .filter(Boolean);
+          if (dates.length > 0) {
+            startDate = new Date(Math.min.apply(null, dates.map(d => d.getTime())));
+          }
+        } else if (body.date) {
+          startDate = new Date(body.date);
+        }
+        if (startDate && !isNaN(startDate.getTime())) {
+          await Loan.findByIdAndUpdate(id, { collectionStartDate: startDate }, { new: false });
+        }
+      } catch (e) {
+        console.error('[DISTRIBUTIONS] failed to set collectionStartDate', e);
+        // continue without failing the request
+      }
     }
 
     // Record metrics: increment waiting-to-be-collected by the distributed principal amount(s)

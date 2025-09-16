@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const { ensureUserIndexes } = require('./utils/ensureUserIndexes');
 
 const app = express();
 
@@ -51,8 +52,10 @@ app.use('/api/metrics', require('./routes/metricsRoutes'));
 const PORT = process.env.PORT || 5000;
 
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => {
+  .then(async () => {
     console.log('Connected to MongoDB');
+    // Ensure indexes are correct (drop legacy global unique indexes if any)
+    await ensureUserIndexes();
     // Listen for requests
     app.listen(PORT, () => {
       console.log(`Server is listening on port ${PORT}`);
