@@ -7,20 +7,15 @@ const { ensureUserIndexes } = require('./utils/ensureUserIndexes');
 const app = express();
 
 // Middleware
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'Accept',
-    'X-Requested-With',
-    'x-user-email',
-  ],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204,
-}));
+// Allow all origins and headers; defaults reflect requested headers
+app.use(cors());
+// Ensure preflight requests are handled for all routes
+app.options('*', cors());
+// Preserve exposure of pagination/content range headers for clients
+app.use((req, res, next) => {
+  res.header('Access-Control-Expose-Headers', 'Content-Range, X-Content-Range');
+  next();
+});
 // Increase body size limits to allow base64 images from mobile app
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -64,4 +59,3 @@ mongoose.connect(process.env.MONGODB_URI)
   .catch((error) => {
     console.error('Error connecting to MongoDB:', error.message);
   });
-
