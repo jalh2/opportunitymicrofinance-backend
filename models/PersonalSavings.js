@@ -21,6 +21,5 @@ const personalSavingsAccountSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 personalSavingsAccountSchema.index({ 'transactions.date': -1 });
-personalSavingsAccountSchema.index({ client: 1 }, { unique: true });
 
 module.exports = mongoose.model('PersonalSavingsAccount', personalSavingsAccountSchema);

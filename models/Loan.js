@@ -65,7 +65,7 @@ const loanSchema = new mongoose.Schema({
   loanAmount: { type: Number, required: true },
   interestRate: { type: Number, required: true },
   currency: { type: String, required: true, enum: ['USD', 'LRD'], default: 'LRD' },
-  status: { type: String, enum: ['pending', 'active', 'paid', 'defaulted'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'denied', 'active', 'paid', 'defaulted'], default: 'pending' },
 
   // Collection Fields
   loanOfficerName: { type: String, required: true },

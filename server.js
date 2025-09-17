@@ -10,7 +10,8 @@ const app = express();
 // Allow all origins and headers; defaults reflect requested headers
 app.use(cors());
 // Ensure preflight requests are handled for all routes
-app.options('*', cors());
+// Use a RegExp to avoid path-to-regexp parsing issues with '*' on some versions
+app.options(/.*/, cors());
 // Preserve exposure of pagination/content range headers for clients
 app.use((req, res, next) => {
   res.header('Access-Control-Expose-Headers', 'Content-Range, X-Content-Range');

@@ -7,9 +7,10 @@ const {
   addPersonalTransaction,
 } = require('../controllers/personalSavingsController');
 const { identifyUserFromHeader, authorizeRoles } = require('../middleware/authMiddleware');
+const { roles } = require('../config/roles');
 
-// Roles allowed to manage personal savings
-const ALLOWED_ROLES = ['admin', 'manager', 'branch head'];
+// Roles allowed to manage personal savings: all except 'loan officer' (to match Security Deposit access)
+const ALLOWED_ROLES = roles.filter(r => r !== 'loan officer');
 
 // Identify user for all routes in this file
 router.use(identifyUserFromHeader);

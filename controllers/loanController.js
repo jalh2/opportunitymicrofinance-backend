@@ -3,7 +3,7 @@ const Loan = require('../models/Loan');
 const Client = require('../models/Client');
 const Group = require('../models/Group');
 const metricService = require('../services/metricService');
-const SavingsAccount = require('../models/Savings');
+const PersonalSavingsAccount = require('../models/PersonalSavings');
 
 // Create a new loan application
 exports.createLoan = async (req, res) => {
@@ -151,14 +151,15 @@ exports.createLoan = async (req, res) => {
         } catch (eInc) {
           console.error('[GROUP] Failed to increment groupTotalLoanAmount on create(active)', eInc);
         }
-        // Also auto-deposit security deposit into group's savings account
+        // Also auto-deposit security deposit into the individual's personal savings account
         const security = Number(loan.securityDeposit || 0);
-        if (security > 0) {
-          const groupId = loan.group;
-          let account = await SavingsAccount.findOne({ group: groupId });
+        if (security > 0 && loan.client) {
+          const clientId = loan.client;
+          let account = await PersonalSavingsAccount.findOne({ client: clientId });
           if (!account) {
-            account = new SavingsAccount({
-              group: groupId,
+            account = new PersonalSavingsAccount({
+              client: clientId,
+              group: loan.group,
               currency: loan.currency || 'LRD',
             });
           }
@@ -174,7 +175,6 @@ exports.createLoan = async (req, res) => {
             withdrawalAmount: 0,
             balance: newBalance,
             currency: account.currency || 'LRD',
-            type: 'security',
           });
           account.currentBalance = newBalance;
           await account.save();
@@ -186,13 +186,10 @@ exports.createLoan = async (req, res) => {
               currency: account.currency || 'LRD',
               date: depositDate,
               inc: {
-                totalSavingsDeposits: deposit,
-                netSavingsFlow: deposit,
-                totalSavingsBalance: deposit,
-                totalSecurityDepositsFlow: deposit,
-                totalSecuritySavingsBalance: deposit,
+                totalPersonalSavingsFlow: deposit,
+                totalPersonalSavingsBalance: deposit,
               },
-              group: groupId,
+              group: loan.group,
               groupName: groupData.groupName || '',
               groupCode: groupData.groupCode || '',
               updatedBy: (req.user && req.user.id) || null,
@@ -200,12 +197,12 @@ exports.createLoan = async (req, res) => {
               updatedByEmail: (req.user && req.user.email) || '',
               // rich context
               loan: loan._id || null,
-              client: loan.client || null,
+              client: clientId || null,
               loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
-              updateSource: 'securityDepositOnApproval',
+              updateSource: 'securityDepositOnApprovalPersonal',
             });
           } catch (e2) {
-            console.error('[SNAPSHOT] security deposit increment (create) failed', e2);
+            console.error('[SNAPSHOT] personal savings security deposit increment (create) failed', e2);
           }
         }
       }
@@ -409,8 +406,8 @@ exports.listCollectionsDue = async (req, res) => {
 // Update loan status (e.g., approve -> active) and compute weekly per-member installment on approval
 exports.setLoanStatus = async (req, res) => {
   try {
-    const { status } = req.body; // expected one of ['pending','active','paid','defaulted']
-    const allowed = ['pending', 'active', 'paid', 'defaulted'];
+    const { status } = req.body; // expected one of ['pending','denied','active','paid','defaulted']
+    const allowed = ['pending', 'denied', 'active', 'paid', 'defaulted'];
     if (!allowed.includes(status)) {
       return res.status(400).json({ message: 'Invalid status value' });
     }
@@ -477,16 +474,17 @@ exports.setLoanStatus = async (req, res) => {
     } catch (e) {
       console.error('[SNAPSHOT] incrementForLoanApproval (status change) failed', e);
     }
-    // Auto-deposit security deposit into group's savings account on activation
+    // Auto-deposit security deposit into the individual's personal savings account on activation
     try {
       if (prevStatus !== 'active' && status === 'active') {
         const security = Number(loan.securityDeposit || 0);
-        if (security > 0) {
-          const groupId = (loan.group && loan.group._id) ? loan.group._id : loan.group;
-          let account = await SavingsAccount.findOne({ group: groupId });
+        if (security > 0 && loan.client) {
+          const clientId = (loan.client && loan.client._id) ? loan.client._id : loan.client;
+          let account = await PersonalSavingsAccount.findOne({ client: clientId });
           if (!account) {
-            account = new SavingsAccount({
-              group: groupId,
+            account = new PersonalSavingsAccount({
+              client: clientId,
+              group: (loan.group && loan.group._id) ? loan.group._id : loan.group,
               currency: loan.currency || 'LRD',
             });
           }
@@ -502,46 +500,41 @@ exports.setLoanStatus = async (req, res) => {
             withdrawalAmount: 0,
             balance: newBalance,
             currency: account.currency || 'LRD',
-            type: 'security',
           });
           account.currentBalance = newBalance;
           await account.save();
 
-          // Update financial snapshots for this security deposit
+          // Update financial snapshots for this personal savings security deposit
           try {
-            const grp = loan.group;
             await metricService.incrementMetrics({
               branchName: loan.branchName,
               branchCode: loan.branchCode,
               currency: account.currency || 'LRD',
               date: depositDate,
               inc: {
-                totalSavingsDeposits: deposit,
-                netSavingsFlow: deposit,
-                totalSavingsBalance: deposit,
-                totalSecurityDepositsFlow: deposit,
-                totalSecuritySavingsBalance: deposit,
+                totalPersonalSavingsFlow: deposit,
+                totalPersonalSavingsBalance: deposit,
               },
               // audit/context
-              group: groupId,
-              groupName: (grp && grp.groupName) || '',
-              groupCode: (grp && grp.groupCode) || '',
+              group: (loan.group && loan.group._id) ? loan.group._id : loan.group,
+              groupName: (loan.group && loan.group.groupName) || '',
+              groupCode: (loan.group && loan.group.groupCode) || '',
               updatedBy: (req.user && req.user.id) || null,
               updatedByName: (req.user && req.user.username) || '',
               updatedByEmail: (req.user && req.user.email) || '',
               // rich context
               loan: loan._id || null,
-              client: loan.client || null,
+              client: clientId || null,
               loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
-              updateSource: 'securityDepositOnApproval',
+              updateSource: 'securityDepositOnApprovalPersonal',
             });
           } catch (e2) {
-            console.error('[SNAPSHOT] security deposit increment failed', e2);
+            console.error('[SNAPSHOT] personal savings security deposit increment failed', e2);
           }
         }
       }
     } catch (e) {
-      console.error('[SECURITY_DEPOSIT] auto deposit on approval failed', e);
+      console.error('[SECURITY_DEPOSIT] auto deposit into personal savings on approval failed', e);
     }
     // Return populated loan so UI consistently has groupName and member names
     const populated = await Loan.findById(loan._id)
