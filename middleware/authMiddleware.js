@@ -60,13 +60,15 @@ const identifyUserFromHeader = async (req, res, next) => {
 
 // Authorize based on role(s)
 const authorizeRoles = (...roles) => (req, res, next) => {
-  console.log('[AUTH] authorizeRoles check', { required: roles, user: req.user ? { id: req.user.id, role: req.user.role } : null, path: req.path, method: req.method });
+  const required = (roles || []).map(r => String(r).trim().toLowerCase());
+  const userRole = req.user && req.user.role ? String(req.user.role).trim().toLowerCase() : '';
+  console.log('[AUTH] authorizeRoles check', { required, user: req.user ? { id: req.user.id, role: userRole } : null, path: req.path, method: req.method });
   if (!req.user || !req.user.role) {
     console.warn('[AUTH] authorizeRoles: user not identified');
     return res.status(401).json({ message: 'User not identified' });
   }
-  if (!roles.includes(req.user.role)) {
-    console.warn('[AUTH] authorizeRoles: access denied', { userRole: req.user.role, required: roles });
+  if (!required.includes(userRole)) {
+    console.warn('[AUTH] authorizeRoles: access denied', { userRole, required });
     return res.status(403).json({ message: 'Access denied: insufficient role' });
   }
   console.log('[AUTH] authorizeRoles: allowed');

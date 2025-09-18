@@ -7,6 +7,7 @@ const roles = [
 
   // Executive leadership
   'board chair',
+  'board chairman',
   'ceo',
   'cfo',
   'coo',

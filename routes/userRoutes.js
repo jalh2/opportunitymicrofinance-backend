@@ -18,43 +18,43 @@ router.use(identifyUserFromHeader);
 // @route   GET api/users/loan-officers
 // @desc    Get all loan officers
 // @access  Admin, Manager, Branch Head, Staff, Field Agent, Loan Officer
-router.get('/loan-officers', authorizeRoles('admin', 'manager', 'branch head', 'staff', 'field agent', 'loan officer'), getLoanOfficers);
+router.get('/loan-officers', authorizeRoles('admin', 'manager', 'branch head', 'staff', 'field agent', 'loan officer', 'board chair', 'board chairman'), getLoanOfficers);
 
 // @route   GET api/users/branches
 // @desc    Get all branches
 // @access  Admin, Manager, Branch Head, Staff, Field Agent, Loan Officer
-router.get('/branches', authorizeRoles('admin', 'manager', 'branch head', 'staff', 'field agent', 'loan officer'), getBranches);
+router.get('/branches', authorizeRoles('admin', 'manager', 'branch head', 'staff', 'field agent', 'loan officer', 'board chair', 'board chairman'), getBranches);
 
 // --- Admin Only Routes ---
 
 // @route   GET api/users
 // @desc    Get all users
 // @access  Admin only
-router.get('/', authorizeRoles('admin'), getAllUsers);
+router.get('/', authorizeRoles('admin', 'board chair', 'board chairman'), getAllUsers);
 
 // @route   GET api/users/:id
 // @desc    Get user by ID
 // @access  Admin only
-router.get('/:id', authorizeRoles('admin'), getUserById);
+router.get('/:id', authorizeRoles('admin', 'board chair', 'board chairman'), getUserById);
 
 // @route   POST api/users
 // @desc    Create/register a user (admin)
 // @access  Admin only
-router.post('/', authorizeRoles('admin'), createUser);
+router.post('/', authorizeRoles('admin', 'board chair', 'board chairman'), createUser);
 
 // @route   PUT api/users/:id
 // @desc    Update a user
 // @access  Admin only
-router.put('/:id', authorizeRoles('admin'), updateUser);
+router.put('/:id', authorizeRoles('admin', 'board chair', 'board chairman'), updateUser);
 
 // @route   PATCH api/users/:id/password
 // @desc    Change/reset a user's password (admin)
 // @access  Admin only
-router.patch('/:id/password', authorizeRoles('admin'), changePassword);
+router.patch('/:id/password', authorizeRoles('admin', 'board chair', 'board chairman'), changePassword);
 
 // @route   DELETE api/users/:id
 // @desc    Delete a user
 // @access  Admin only
-router.delete('/:id', authorizeRoles('admin'), deleteUser);
+router.delete('/:id', authorizeRoles('admin', 'board chair', 'board chairman'), deleteUser);
 
 module.exports = router;
