@@ -2,6 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const http = require('http');
+const { Server } = require('socket.io');
+const bus = require('./utils/eventBus');
 const { ensureUserIndexes } = require('./utils/ensureUserIndexes');
 
 const app = express();
@@ -44,6 +47,31 @@ app.use('/api/snapshots', require('./routes/snapshotRoutes'));
 app.use('/api/bank-deposit-savings', require('./routes/bankDepositRoutes'));
 app.use('/api/metrics', require('./routes/metricsRoutes'));
 
+// HTTP server + Socket.IO
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  },
+});
+
+io.on('connection', (socket) => {
+  console.log('[socket.io] client connected', socket.id);
+  socket.on('disconnect', (reason) => {
+    console.log('[socket.io] client disconnected', socket.id, reason);
+  });
+});
+
+// Bridge backend metric events to socket.io
+bus.on('metrics:changed', (payload) => {
+  try {
+    io.emit('metrics:changed', payload);
+  } catch (e) {
+    console.warn('[socket.io] emit metrics:changed failed', e.message);
+  }
+});
+
 // MongoDB Connection
 const PORT = process.env.PORT || 5000;
 
@@ -53,7 +81,7 @@ mongoose.connect(process.env.MONGODB_URI)
     // Ensure indexes are correct (drop legacy global unique indexes if any)
     await ensureUserIndexes();
     // Listen for requests
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       console.log(`Server is listening on port ${PORT}`);
     });
   })

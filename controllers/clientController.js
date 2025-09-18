@@ -61,7 +61,7 @@ exports.registerClient = async (req, res) => {
     group.clients.push(client._id);
     await group.save();
 
-    // Admission fee: LRD 1,000 collected at registration
+    // Admission fee: mark as pending at registration (becomes actual on loan approval)
     try {
       const fee = 1000;
       await metricService.incrementMetrics({
@@ -70,9 +70,7 @@ exports.registerClient = async (req, res) => {
         currency: 'LRD',
         date: admissionDate || new Date(),
         inc: {
-          totalAdmissionFees: fee,
-          totalFeesCollected: fee,
-          totalProfit: fee,
+          totalPendingAdmissionFees: fee,
         },
         // audit/context
         group: group._id,

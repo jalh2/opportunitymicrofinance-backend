@@ -117,6 +117,9 @@ exports.createLoan = async (req, res) => {
         date: new Date(),
         inc: {
           totalAppraisalFees: appraisalFee,
+          // Include appraisal fees in overall fees collected and profit (business rule)
+          totalFeesCollected: appraisalFee,
+          totalProfit: appraisalFee,
           totalPendingLoanAmount: principal,
         },
         // audit/context
@@ -135,6 +138,33 @@ exports.createLoan = async (req, res) => {
     } catch (e) {
       console.error('[SNAPSHOT] increment on loan create failed', e);
     }
+    // If loan is submitted (not active yet), record pending security deposit
+    try {
+      const security = Number(loan.securityDeposit || 0);
+      if (security > 0 && status !== 'active') {
+        await metricService.incrementMetrics({
+          branchName: loan.branchName,
+          branchCode: loan.branchCode,
+          currency: loan.currency,
+          date: new Date(),
+          inc: { totalPendingSecurityDeposit: security },
+          // audit/context
+          group: loan.group,
+          groupName: groupData.groupName,
+          groupCode: groupData.groupCode,
+          updatedBy: req.user && req.user.id ? req.user.id : null,
+          updatedByName: req.user && req.user.username ? req.user.username : '',
+          updatedByEmail: req.user && req.user.email ? req.user.email : '',
+          // rich context
+          loan: loan._id || null,
+          client: loan.client || null,
+          loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
+          updateSource: 'loanCreate',
+        });
+      }
+    } catch (e) {
+      console.error('[SNAPSHOT] pending security deposit increment on create failed', e);
+    }
     // If loan is created already active, increment snapshot for approval day
     try {
       if (status === 'active') {
@@ -150,6 +180,54 @@ exports.createLoan = async (req, res) => {
           await Group.findByIdAndUpdate(loan.group, { $inc: { groupTotalLoanAmount: Number(loan.loanAmount || 0) } });
         } catch (eInc) {
           console.error('[GROUP] Failed to increment groupTotalLoanAmount on create(active)', eInc);
+        }
+        // Convert pending admissions to actual and clear pending security deposit
+        try {
+          const security = Number(loan.securityDeposit || 0);
+          if (security > 0) {
+            await metricService.incrementMetrics({
+              branchName: loan.branchName,
+              branchCode: loan.branchCode,
+              currency: loan.currency || 'LRD',
+              date: new Date(),
+              inc: { totalPendingSecurityDeposit: -security },
+              group: loan.group,
+              groupName: groupData.groupName || '',
+              groupCode: groupData.groupCode || '',
+              updatedBy: (req.user && req.user.id) || null,
+              updatedByName: (req.user && req.user.username) || '',
+              updatedByEmail: (req.user && req.user.email) || '',
+              loan: loan._id || null,
+              client: loan.client || null,
+              loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
+              updateSource: 'loanApproval',
+            });
+          }
+          const admissionFee = Number(loan.memberAdmissionFee || 1000);
+          await metricService.incrementMetrics({
+            branchName: loan.branchName,
+            branchCode: loan.branchCode,
+            currency: 'LRD',
+            date: new Date(),
+            inc: {
+              totalPendingAdmissionFees: -admissionFee,
+              totalAdmissionFees: admissionFee,
+              totalFeesCollected: admissionFee,
+              totalProfit: admissionFee,
+            },
+            group: loan.group,
+            groupName: groupData.groupName || '',
+            groupCode: groupData.groupCode || '',
+            updatedBy: (req.user && req.user.id) || null,
+            updatedByName: (req.user && req.user.username) || '',
+            updatedByEmail: (req.user && req.user.email) || '',
+            loan: loan._id || null,
+            client: loan.client || null,
+            loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
+            updateSource: 'loanApproval',
+          });
+        } catch (eConv) {
+          console.error('[SNAPSHOT] convert pending to actual on create(active) failed', eConv);
         }
         // Also auto-deposit security deposit into the individual's personal savings account
         const security = Number(loan.securityDeposit || 0);
@@ -470,9 +548,86 @@ exports.setLoanStatus = async (req, res) => {
         } catch (eInc) {
           console.error('[GROUP] Failed to increment groupTotalLoanAmount on status activate', eInc);
         }
+        // Convert pending admissions to actual and clear pending security deposit
+        try {
+          const security = Number(loan.securityDeposit || 0);
+          if (security > 0) {
+            await metricService.incrementMetrics({
+              branchName: loan.branchName,
+              branchCode: loan.branchCode,
+              currency: loan.currency || 'LRD',
+              date: new Date(),
+              inc: { totalPendingSecurityDeposit: -security },
+              group: (loan.group && loan.group._id) ? loan.group._id : loan.group,
+              groupName: loan.group && loan.group.groupName ? loan.group.groupName : '',
+              groupCode: loan.group && loan.group.groupCode ? loan.group.groupCode : '',
+              updatedBy: (req.user && req.user.id) || null,
+              updatedByName: (req.user && req.user.username) || '',
+              updatedByEmail: (req.user && req.user.email) || '',
+              loan: loan._id || null,
+              client: (loan.client && loan.client._id) ? loan.client._id : loan.client,
+              loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
+              updateSource: 'loanApproval',
+            });
+          }
+          const admissionFee = Number(loan.memberAdmissionFee || 1000);
+          await metricService.incrementMetrics({
+            branchName: loan.branchName,
+            branchCode: loan.branchCode,
+            currency: 'LRD',
+            date: new Date(),
+            inc: {
+              totalPendingAdmissionFees: -admissionFee,
+              totalAdmissionFees: admissionFee,
+              totalFeesCollected: admissionFee,
+              totalProfit: admissionFee,
+            },
+            group: (loan.group && loan.group._id) ? loan.group._id : loan.group,
+            groupName: loan.group && loan.group.groupName ? loan.group.groupName : '',
+            groupCode: loan.group && loan.group.groupCode ? loan.group.groupCode : '',
+            updatedBy: (req.user && req.user.id) || null,
+            updatedByName: (req.user && req.user.username) || '',
+            updatedByEmail: (req.user && req.user.email) || '',
+            loan: loan._id || null,
+            client: (loan.client && loan.client._id) ? loan.client._id : loan.client,
+            loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
+            updateSource: 'loanApproval',
+          });
+        } catch (eConv) {
+          console.error('[SNAPSHOT] convert pending to actual on status activate failed', eConv);
+        }
       }
     } catch (e) {
       console.error('[SNAPSHOT] incrementForLoanApproval (status change) failed', e);
+    }
+    // On denial, clear pending amounts (principal and security deposit) since the loan won't proceed
+    try {
+      if (prevStatus !== 'denied' && status === 'denied' && prevStatus !== 'active') {
+        const principal = Number(loan.loanAmount || 0);
+        const security = Number(loan.securityDeposit || 0);
+        await metricService.incrementMetrics({
+          branchName: loan.branchName,
+          branchCode: loan.branchCode,
+          currency: loan.currency || 'LRD',
+          date: new Date(),
+          inc: {
+            totalPendingLoanAmount: -principal,
+            ...(security > 0 ? { totalPendingSecurityDeposit: -security } : {}),
+          },
+          group: (loan.group && loan.group._id) ? loan.group._id : loan.group,
+          groupName: loan.group && loan.group.groupName ? loan.group.groupName : '',
+          groupCode: loan.group && loan.group.groupCode ? loan.group.groupCode : '',
+          updatedBy: (req.user && req.user.id) || null,
+          updatedByName: (req.user && req.user.username) || '',
+          updatedByEmail: (req.user && req.user.email) || '',
+          loan: loan._id || null,
+          client: (loan.client && loan.client._id) ? loan.client._id : loan.client,
+          loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
+          updateSource: 'loanDenied',
+        });
+      }
+    } catch (e) {
+      console.error('[SNAPSHOT] clear pending on denial failed', e);
     }
     // Auto-deposit security deposit into the individual's personal savings account on activation
     try {

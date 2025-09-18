@@ -1,4 +1,5 @@
 const Metric = require('../models/Metric');
+const bus = require('./eventBus');
 
 function normalizeDay(d) {
   const dt = d ? new Date(d) : new Date();
@@ -21,7 +22,7 @@ async function recordMetric({
 }) {
   if (value == null || isNaN(Number(value))) return null;
   const day = normalizeDay(date);
-  return Metric.create({
+  const doc = await Metric.create({
     metric,
     value: Number(value),
     date: date || new Date(),
@@ -35,6 +36,26 @@ async function recordMetric({
     client,
     extra,
   });
+  try {
+    bus.emit('metrics:changed', {
+      kind: 'single',
+      docs: [
+        {
+          metric: doc.metric,
+          value: doc.value,
+          date: doc.date,
+          branchName: doc.branchName,
+          branchCode: doc.branchCode,
+          loanOfficerName: doc.loanOfficerName,
+          currency: doc.currency,
+          loan: doc.loan,
+          group: doc.group,
+          client: doc.client,
+        },
+      ],
+    });
+  } catch (_) {}
+  return doc;
 }
 
 async function recordMany(events) {
@@ -48,7 +69,25 @@ async function recordMany(events) {
       date: e.date || new Date(),
     }));
   if (docs.length === 0) return [];
-  return Metric.insertMany(docs);
+  const inserted = await Metric.insertMany(docs);
+  try {
+    bus.emit('metrics:changed', {
+      kind: 'batch',
+      docs: inserted.map((doc) => ({
+        metric: doc.metric,
+        value: doc.value,
+        date: doc.date,
+        branchName: doc.branchName,
+        branchCode: doc.branchCode,
+        loanOfficerName: doc.loanOfficerName,
+        currency: doc.currency,
+        loan: doc.loan,
+        group: doc.group,
+        client: doc.client,
+      })),
+    });
+  } catch (_) {}
+  return inserted;
 }
 
 function computeInterestForLoan(loan) {

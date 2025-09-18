@@ -176,16 +176,12 @@ exports.getProfit = async (req, res) => {
     const splitFields = parseSplitBy(req.query.splitBy);
     const groupId = buildGroupId(groupBy, splitFields);
 
-    // Income metrics: include feesCollected/admissionFees used in this project,
-  // and keep legacy GodGrace names for compatibility
+    // Income metrics (business rule): include only interest, admission fees, and appraisal fees.
+  // Explicitly exclude weekly fees collected during collections from income.
   const incomeMetrics = [
     'interestCollected',
-    'feesCollected',
     'admissionFees',
-    'totalFormFees',
-    'totalInspectionFees',
-    'totalProcessingFees',
-    'lostDueBookFee',
+    'appraisalFees',
   ];
     const expenseMetrics = ['expenses'];
 
