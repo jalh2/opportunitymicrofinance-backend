@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   createLoan,
   getAllLoans,
+  getLoansCount,
   getLoanById,
   updateLoan,
   deleteLoan,
@@ -21,6 +22,10 @@ router.post('/', createLoan);
 // @route   GET api/loans
 // @desc    Get all loans
 router.get('/', getAllLoans);
+
+// @route   GET api/loans/count
+// @desc    Get loans count (optionally filtered by branchCode)
+router.get('/count', getLoansCount);
 
 // @route   GET api/loans/collections-due
 // @desc    List loans due for collection within a date range

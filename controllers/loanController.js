@@ -608,6 +608,22 @@ exports.getAllLoans = async (req, res) => {
   }
 };
 
+// Get loans count (optionally filter by branchCode via ?branchCode=...)
+exports.getLoansCount = async (req, res) => {
+  try {
+    const { branchCode } = req.query;
+    const filter = {};
+    if (branchCode) {
+      filter.branchCode = branchCode;
+    }
+    const count = await Loan.countDocuments(filter);
+    res.json({ count });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send('Server error');
+  }
+};
+
 // Get loan by ID
 exports.getLoanById = async (req, res) => {
   try {

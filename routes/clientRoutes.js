@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   registerClient,
   getAllClients,
+  getClientsCount,
   getClientById,
   updateClient,
   deleteClient
@@ -15,6 +16,10 @@ router.post('/register', registerClient);
 // @route   GET api/clients
 // @desc    Get all clients
 router.get('/', getAllClients);
+
+// @route   GET api/clients/count
+// @desc    Get clients count (optionally filtered by branchCode)
+router.get('/count', getClientsCount);
 
 // @route   GET api/clients/:id
 // @desc    Get client by ID

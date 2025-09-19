@@ -97,6 +97,22 @@ exports.registerClient = async (req, res) => {
   }
 };
 
+// Get clients count (optionally filter by branchCode via ?branchCode=...)
+exports.getClientsCount = async (req, res) => {
+  try {
+    const { branchCode } = req.query;
+    const filter = {};
+    if (branchCode) {
+      filter.branchCode = branchCode;
+    }
+    const count = await Client.countDocuments(filter);
+    res.json({ count });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).send('Server error');
+  }
+};
+
 // Get all clients
 exports.getAllClients = async (req, res) => {
   try {
