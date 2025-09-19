@@ -6,7 +6,7 @@ const metricService = require('../services/metricService');
 
 // Register a new client
 exports.registerClient = async (req, res) => {
-  const { branchName, branchCode, groupName, groupCode, memberName, memberImage, memberAge, guardianName, memberNumber, admissionDate, passBookIssuedDate, nationalId, memberSignature } = req.body;
+  const { branchName, branchCode, groupName, groupCode, memberName, memberImage, memberAge, guardianName, phone, memberNumber, admissionDate, passBookIssuedDate, nationalId, memberSignature } = req.body;
 
   try {
     const group = await Group.findOne({ groupCode });
@@ -40,6 +40,7 @@ exports.registerClient = async (req, res) => {
         memberImage,
         memberAge,
         guardianName,
+        phone,
         memberNumber,
         admissionDate,
         passBookIssuedDate,

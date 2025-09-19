@@ -10,6 +10,7 @@ const clientSchema = new mongoose.Schema({
   memberImage: { type: String }, // Base64 encoded image
   memberAge: { type: Number, required: true },
   guardianName: { type: String, required: true }, // Mother/Husband's Name
+  phone: { type: String, required: false },
   memberNumber: { type: String, required: true },
   admissionDate: { type: Date, required: true },
   passBookIssuedDate: { type: Date, required: true },
@@ -28,3 +29,4 @@ const clientSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 module.exports = mongoose.model('Client', clientSchema);
+
