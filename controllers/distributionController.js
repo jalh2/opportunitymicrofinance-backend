@@ -186,3 +186,83 @@ exports.createDistribution = async (req, res) => {
     res.status(400).json({ message: error.message || 'Failed to create distribution' });
   }
 };
+
+// GET /api/loans/group/:id/distributions/summary
+// Returns a map of loanId -> { complete, covered, total }
+// complete: whether distribution coverage is complete for the loan
+//  - per-client loans: complete if there is at least one distribution record
+//  - legacy group loans: complete if all current group members have a distribution entry
+exports.getDistributionSummaryByGroup = async (req, res) => {
+  try {
+    const { id } = req.params; // group id
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid group id' });
+    }
+
+    // Load group members (for legacy group-loan coverage checks)
+    const group = await Group.findById(id)
+      .select('clients')
+      .populate('clients', 'memberName');
+    if (!group) {
+      return res.status(404).json({ message: 'Group not found' });
+    }
+    const membersArr = Array.isArray(group.clients) ? group.clients : [];
+    const memberIds = new Set(membersArr.map(m => String(m._id)));
+    const memberNames = new Set(
+      membersArr.map(m => String((m.memberName || '').trim()).toLowerCase()).filter(Boolean)
+    );
+
+    // Find loans in the group
+    const loans = await Loan.find({ group: id }).select('_id client clients');
+    const loanIds = loans.map(l => String(l._id));
+    if (loanIds.length === 0) {
+      return res.json({});
+    }
+
+    // Fetch all distributions for these loans in one query
+    const distributions = await Distribution.find({ loan: { $in: loanIds } })
+      .select('loan member memberName')
+      .lean();
+
+    // Group distributions by loan
+    const byLoan = new Map();
+    for (const d of distributions) {
+      const key = String(d.loan);
+      if (!byLoan.has(key)) byLoan.set(key, []);
+      byLoan.get(key).push(d);
+    }
+
+    // Build summary
+    const summary = {};
+    for (const loan of loans) {
+      const lid = String(loan._id);
+      const arr = byLoan.get(lid) || [];
+      if (loan.client) {
+        // Per-client loan: at least one distribution indicates complete
+        const complete = arr.length > 0;
+        summary[lid] = { complete, covered: complete ? 1 : 0, total: 1 };
+      } else {
+        // Legacy group loan: compute coverage against current group members
+        const coveredSet = new Set();
+        for (const d of arr) {
+          if (d.member) {
+            const mid = String(d.member);
+            if (memberIds.has(mid)) coveredSet.add(mid);
+          } else if (d.memberName) {
+            const n = String(d.memberName).trim().toLowerCase();
+            if (memberNames.has(n)) coveredSet.add(n);
+          }
+        }
+        const total = membersArr.length;
+        const covered = coveredSet.size;
+        const complete = total > 0 ? covered >= total : false;
+        summary[lid] = { complete, covered, total };
+      }
+    }
+
+    return res.json(summary);
+  } catch (error) {
+    console.error('[DISTRIBUTIONS] getDistributionSummaryByGroup error', error);
+    return res.status(500).json({ message: error.message || 'Server error' });
+  }
+};

@@ -12,7 +12,7 @@ const {
   listCollectionsDue
 } = require('../controllers/loanController');
 const { identifyUserFromHeader, authorizeRoles } = require('../middleware/authMiddleware');
-const { getDistributionsByLoan, createDistribution } = require('../controllers/distributionController');
+const { getDistributionsByLoan, createDistribution, getDistributionSummaryByGroup } = require('../controllers/distributionController');
 
 // @route   POST api/loans
 // @desc    Create a loan
@@ -72,5 +72,9 @@ router.post(
   authorizeRoles('admin', 'manager', 'branch head', 'loan officer', 'staff', 'field agent', 'board chair', 'board chairman'),
   createDistribution
 );
+
+// @route   GET api/loans/group/:id/distributions/summary
+// @desc    Summarize distribution coverage for all loans in a group
+router.get('/group/:id/distributions/summary', getDistributionSummaryByGroup);
 
 module.exports = router;

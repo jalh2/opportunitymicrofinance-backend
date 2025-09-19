@@ -100,7 +100,9 @@ exports.registerClient = async (req, res) => {
 // Get all clients
 exports.getAllClients = async (req, res) => {
   try {
-    const clients = await Client.find().populate('group', 'groupName branchName');
+    const clients = await Client.find()
+      .select('-memberImage -memberSignature')
+      .populate('group', 'groupName branchName');
     res.json(clients);
   } catch (error) {
     console.error(error.message);

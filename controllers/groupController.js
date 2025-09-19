@@ -68,7 +68,7 @@ exports.getAllGroups = async (req, res) => {
 exports.getGroupById = async (req, res) => {
   try {
     const group = await Group.findById(req.params.id)
-      .populate('clients')
+      .populate('clients', '-memberImage -memberSignature')
       .populate('leader', 'memberName passBookNumber')
       .populate('secretary', 'memberName passBookNumber')
       .populate('treasurer', 'memberName passBookNumber');
@@ -158,7 +158,7 @@ exports.deleteGroup = async (req, res) => {
 // Search clients by group
 exports.searchClientsByGroup = async (req, res) => {
     try {
-        const group = await Group.findById(req.params.id).populate('clients');
+        const group = await Group.findById(req.params.id).populate('clients', '-memberImage -memberSignature');
         if (!group) {
             return res.status(404).json({ message: 'Group not found' });
         }

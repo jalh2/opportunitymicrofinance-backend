@@ -590,10 +590,15 @@ exports.setLoanStatus = async (req, res) => {
   }
 };
 
-// Get all loans
+// Get all loans (optionally filter by group via ?groupId=...)
 exports.getAllLoans = async (req, res) => {
   try {
-    const loans = await Loan.find()
+    const { groupId } = req.query;
+    const filter = {};
+    if (groupId) {
+      filter.group = groupId;
+    }
+    const loans = await Loan.find(filter)
       .populate('group', 'groupName')
       .populate('client', 'memberName passBookNumber');
     res.json(loans);
