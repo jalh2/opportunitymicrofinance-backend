@@ -61,6 +61,12 @@ const identifyUserFromHeader = async (req, res, next) => {
 // Authorize based on role(s)
 const authorizeRoles = (...roles) => (req, res, next) => {
   const required = (roles || []).map(r => String(r).trim().toLowerCase());
+  // If 'admin' is required, treat 'board chair' and 'board chairman' as admin-equivalent
+  if (required.includes('admin')) {
+    ['board chair', 'board chairman'].forEach(eq => {
+      if (!required.includes(eq)) required.push(eq);
+    });
+  }
   const userRole = req.user && req.user.role ? String(req.user.role).trim().toLowerCase() : '';
   console.log('[AUTH] authorizeRoles check', { required, user: req.user ? { id: req.user.id, role: userRole } : null, path: req.path, method: req.method });
   if (!req.user || !req.user.role) {

@@ -29,10 +29,10 @@ router.get('/:id', authorizeRoles(...ALLOWED_ROLES), getBranchDataById);
 // Update branch data (identify so we can enforce re-approval for non-approvers)
 router.put('/:id', authorizeRoles(...ALLOWED_ROLES), updateBranchData);
 
-// Update status (approve/reject) - only admin or branch head can do this
-router.patch('/:id/status', authorizeRoles('admin', 'branch head'), updateBranchDataStatus);
+// Update status (approve/reject) - admin, branch head, or board chair can do this
+router.patch('/:id/status', authorizeRoles('admin', 'branch head', 'board chair', 'board chairman'), updateBranchDataStatus);
 
-// Delete branch data - only admin or branch head
-router.delete('/:id', authorizeRoles('admin', 'branch head'), deleteBranchData);
+// Delete branch data - admin, branch head, or board chair
+router.delete('/:id', authorizeRoles('admin', 'branch head', 'board chair', 'board chairman'), deleteBranchData);
 
 module.exports = router;

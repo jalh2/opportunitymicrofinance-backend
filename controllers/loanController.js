@@ -3,7 +3,7 @@ const Loan = require('../models/Loan');
 const Client = require('../models/Client');
 const Group = require('../models/Group');
 const metricService = require('../services/metricService');
-const PersonalSavingsAccount = require('../models/PersonalSavings');
+// Note: Removed PersonalSavingsAccount auto-deposit on loan approval; no import required
 
 // Create a new loan application
 exports.createLoan = async (req, res) => {
@@ -229,60 +229,8 @@ exports.createLoan = async (req, res) => {
         } catch (eConv) {
           console.error('[SNAPSHOT] convert pending to actual on create(active) failed', eConv);
         }
-        // Also auto-deposit security deposit into the individual's personal savings account
-        const security = Number(loan.securityDeposit || 0);
-        if (security > 0 && loan.client) {
-          const clientId = loan.client;
-          let account = await PersonalSavingsAccount.findOne({ client: clientId });
-          if (!account) {
-            account = new PersonalSavingsAccount({
-              client: clientId,
-              group: loan.group,
-              currency: loan.currency || 'LRD',
-            });
-          }
-          if (!account.currency) {
-            account.currency = loan.currency || 'LRD';
-          }
-          const depositDate = new Date();
-          const deposit = security;
-          const newBalance = Number(account.currentBalance || 0) + deposit;
-          account.transactions.push({
-            date: depositDate,
-            savingAmount: deposit,
-            withdrawalAmount: 0,
-            balance: newBalance,
-            currency: account.currency || 'LRD',
-          });
-          account.currentBalance = newBalance;
-          await account.save();
-
-          try {
-            await metricService.incrementMetrics({
-              branchName: loan.branchName,
-              branchCode: loan.branchCode,
-              currency: account.currency || 'LRD',
-              date: depositDate,
-              inc: {
-                totalPersonalSavingsFlow: deposit,
-                totalPersonalSavingsBalance: deposit,
-              },
-              group: loan.group,
-              groupName: groupData.groupName || '',
-              groupCode: groupData.groupCode || '',
-              updatedBy: (req.user && req.user.id) || null,
-              updatedByName: (req.user && req.user.username) || '',
-              updatedByEmail: (req.user && req.user.email) || '',
-              // rich context
-              loan: loan._id || null,
-              client: clientId || null,
-              loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
-              updateSource: 'securityDepositOnApprovalPersonal',
-            });
-          } catch (e2) {
-            console.error('[SNAPSHOT] personal savings security deposit increment (create) failed', e2);
-          }
-        }
+        // Business rule: Do NOT auto-deposit security deposit into PersonalSavingsAccount on approval.
+        // Security deposits are managed separately via group Savings transactions (type: 'security').
       }
     } catch (e) {
       console.error('[SNAPSHOT] incrementForLoanApproval failed', e);
@@ -629,68 +577,8 @@ exports.setLoanStatus = async (req, res) => {
     } catch (e) {
       console.error('[SNAPSHOT] clear pending on denial failed', e);
     }
-    // Auto-deposit security deposit into the individual's personal savings account on activation
-    try {
-      if (prevStatus !== 'active' && status === 'active') {
-        const security = Number(loan.securityDeposit || 0);
-        if (security > 0 && loan.client) {
-          const clientId = (loan.client && loan.client._id) ? loan.client._id : loan.client;
-          let account = await PersonalSavingsAccount.findOne({ client: clientId });
-          if (!account) {
-            account = new PersonalSavingsAccount({
-              client: clientId,
-              group: (loan.group && loan.group._id) ? loan.group._id : loan.group,
-              currency: loan.currency || 'LRD',
-            });
-          }
-          if (!account.currency) {
-            account.currency = loan.currency || 'LRD';
-          }
-          const depositDate = new Date();
-          const deposit = security;
-          const newBalance = Number(account.currentBalance || 0) + deposit;
-          account.transactions.push({
-            date: depositDate,
-            savingAmount: deposit,
-            withdrawalAmount: 0,
-            balance: newBalance,
-            currency: account.currency || 'LRD',
-          });
-          account.currentBalance = newBalance;
-          await account.save();
-
-          // Update financial snapshots for this personal savings security deposit
-          try {
-            await metricService.incrementMetrics({
-              branchName: loan.branchName,
-              branchCode: loan.branchCode,
-              currency: account.currency || 'LRD',
-              date: depositDate,
-              inc: {
-                totalPersonalSavingsFlow: deposit,
-                totalPersonalSavingsBalance: deposit,
-              },
-              // audit/context
-              group: (loan.group && loan.group._id) ? loan.group._id : loan.group,
-              groupName: (loan.group && loan.group.groupName) || '',
-              groupCode: (loan.group && loan.group.groupCode) || '',
-              updatedBy: (req.user && req.user.id) || null,
-              updatedByName: (req.user && req.user.username) || '',
-              updatedByEmail: (req.user && req.user.email) || '',
-              // rich context
-              loan: loan._id || null,
-              client: clientId || null,
-              loanOfficerName: loan.loanOfficerName || ((req.user && req.user.username) || ''),
-              updateSource: 'securityDepositOnApprovalPersonal',
-            });
-          } catch (e2) {
-            console.error('[SNAPSHOT] personal savings security deposit increment failed', e2);
-          }
-        }
-      }
-    } catch (e) {
-      console.error('[SECURITY_DEPOSIT] auto deposit into personal savings on approval failed', e);
-    }
+    // Business rule: Do NOT auto-deposit security deposit into PersonalSavingsAccount on activation.
+    // Security deposits are managed separately via group Savings transactions (type: 'security').
     // Return populated loan so UI consistently has groupName and member names
     const populated = await Loan.findById(loan._id)
       .populate('group', 'groupName')

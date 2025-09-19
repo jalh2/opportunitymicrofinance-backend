@@ -27,7 +27,7 @@ router.get('/', getAllLoans);
 router.get(
   '/collections-due',
   identifyUserFromHeader,
-  authorizeRoles('admin', 'manager', 'branch head', 'staff', 'loan officer', 'field agent'),
+  authorizeRoles('admin', 'manager', 'branch head', 'staff', 'loan officer', 'field agent', 'board chair', 'board chairman'),
   listCollectionsDue
 );
 
@@ -44,7 +44,7 @@ router.put('/:id', updateLoan);
 router.patch(
   '/:id/status',
   identifyUserFromHeader,
-  authorizeRoles('admin', 'manager', 'branch head'),
+  authorizeRoles('admin', 'manager', 'branch head', 'board chair', 'board chairman'),
   setLoanStatus
 );
 
@@ -69,7 +69,7 @@ router.get('/:id/distributions', getDistributionsByLoan);
 router.post(
   '/:id/distributions',
   identifyUserFromHeader,
-  authorizeRoles('admin', 'manager', 'branch head', 'loan officer', 'staff', 'field agent'),
+  authorizeRoles('admin', 'manager', 'branch head', 'loan officer', 'staff', 'field agent', 'board chair', 'board chairman'),
   createDistribution
 );
 

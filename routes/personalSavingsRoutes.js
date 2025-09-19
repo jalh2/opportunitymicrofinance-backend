@@ -15,7 +15,7 @@ const ALLOWED_ROLES = roles.filter(r => r !== 'loan officer');
 // Identify user for all routes in this file
 router.use(identifyUserFromHeader);
 
-// Create a savings account (shared account per group)
+// Create a personal savings account (one account per client)
 router.post('/', authorizeRoles(...ALLOWED_ROLES), createPersonalSavingsAccount);
 
 // List all accounts

@@ -10,7 +10,7 @@ const {
 } = require('../controllers/assetController');
 
 // Allowed roles for assets management
-const ALLOWED_ROLES = ['admin', 'manager'];
+const ALLOWED_ROLES = ['admin', 'manager', 'board chair', 'board chairman'];
 
 // Identify user for all routes in this file
 router.use(identifyUserFromHeader);
