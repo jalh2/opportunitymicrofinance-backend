@@ -611,11 +611,10 @@ exports.getAllLoans = async (req, res) => {
 // Get loans count (optionally filter by branchCode via ?branchCode=...)
 exports.getLoansCount = async (req, res) => {
   try {
-    const { branchCode } = req.query;
+    const { branchCode, userName } = req.query;
     const filter = {};
-    if (branchCode) {
-      filter.branchCode = branchCode;
-    }
+    if (branchCode) filter.branchCode = branchCode;
+    if (userName) filter.loanOfficerName = userName;
     const count = await Loan.countDocuments(filter);
     res.json({ count });
   } catch (error) {

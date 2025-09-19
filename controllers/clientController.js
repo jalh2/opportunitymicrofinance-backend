@@ -100,11 +100,10 @@ exports.registerClient = async (req, res) => {
 // Get clients count (optionally filter by branchCode via ?branchCode=...)
 exports.getClientsCount = async (req, res) => {
   try {
-    const { branchCode } = req.query;
+    const { branchCode, userEmail } = req.query;
     const filter = {};
-    if (branchCode) {
-      filter.branchCode = branchCode;
-    }
+    if (branchCode) filter.branchCode = branchCode;
+    if (userEmail) filter.createdByEmail = userEmail;
     const count = await Client.countDocuments(filter);
     res.json({ count });
   } catch (error) {
